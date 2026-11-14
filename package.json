@@ -10,12 +10,14 @@
     "test": "feltkit test",
     "inspect": "feltkit inspect",
     "deploy": "feltkit deploy",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "seed": "node scripts/seed.ts"
   },
   "dependencies": {
     "@feltdb/feltkit": "^0.3.29",
     "@feltdb/webllm": ">=0.21.0 <1.0.0",
     "@mlc-ai/web-llm": "^0.2.84",
+    "lucide-react": "1.72.0",
     "react": "19.2.0",
     "react-dom": "19.2.0"
   },
