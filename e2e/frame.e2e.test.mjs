@@ -101,6 +101,9 @@ test("accounts, profiles, photo upload over HTTP, feed composition", async () =>
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("content-type"), "image/jpeg");
   assert.match(res.headers.get("content-security-policy") ?? "", /sandbox/);
+  // FRAME-GAP-01 evidence: photo links cannot be cached by the browser, and each issue is a new URL.
+  assert.equal(res.headers.get("cache-control"), "private, no-store");
+  assert.notEqual((await bob.query(api.posts.media, { fileId: card.fileId })).url, link.url);
   assert.deepEqual([...new Uint8Array(await res.arrayBuffer()).slice(0, 3)], [0xff, 0xd8, 0xff]);
   assert.equal((await fetch(`${BASE}/api/files/fkf_${"x".repeat(30)}`)).status, 404);
 

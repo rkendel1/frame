@@ -1,0 +1,449 @@
+{
+  "schema": "feltkit.measure/1",
+  "app": {
+    "name": "frame",
+    "feltkit": "^0.3.29",
+    "installed": "0.3.29"
+  },
+  "method": {
+    "files": "git ls-files (tracked, and untracked files that are not ignored); node_modules, dist, .feltkit and .git are never counted",
+    "lines": "lines that are not blank and not only a comment; JSON/YAML/TOML count non-blank lines; assets and documentation count 0",
+    "consumption": "static call sites of ctx.* and of names imported from @feltdb/feltkit, in authored code and tests",
+    "findings": "static patterns in authored code; a finding is a candidate for review, not a verdict"
+  },
+  "provenance": {
+    "scaffold": {
+      "manifest": "feltkit.scaffold.json",
+      "generator": "create-feltkit",
+      "version": "0.3.29",
+      "template": "tasks",
+      "files": 20,
+      "unmodified": 4,
+      "modified": 12,
+      "missing": 4
+    },
+    "generated": {
+      "file": "feltkit/_generated/api.ts",
+      "current": true
+    },
+    "skills": []
+  },
+  "totals": {
+    "domain": {
+      "files": 6,
+      "lines": 504
+    },
+    "experience": {
+      "files": 6,
+      "lines": 1034
+    },
+    "infrastructure": {
+      "files": 1,
+      "lines": 163
+    },
+    "generated": {
+      "files": 5,
+      "lines": 76
+    },
+    "configuration": {
+      "files": 4,
+      "lines": 79
+    },
+    "tests": {
+      "files": 3,
+      "lines": 460
+    },
+    "third-party": {
+      "files": 0,
+      "lines": 0
+    },
+    "platform": {
+      "files": 0,
+      "lines": 0
+    },
+    "excluded": {
+      "files": 7,
+      "lines": 4432
+    },
+    "unclassified": {
+      "files": 0,
+      "lines": 0
+    }
+  },
+  "authored": {
+    "files": 17,
+    "lines": 1780
+  },
+  "definitions": {
+    "app": {
+      "collection": 5,
+      "mutation": 14,
+      "query": 13
+    },
+    "collections": [
+      "profiles",
+      "posts",
+      "follows",
+      "likes",
+      "comments"
+    ]
+  },
+  "consumption": [
+    {
+      "api": "@feltdb/feltkit s",
+      "callSites": 134,
+      "files": 6
+    },
+    {
+      "api": "ctx.db",
+      "callSites": 56,
+      "files": 5
+    },
+    {
+      "api": "@feltdb/feltkit/react useMutation",
+      "callSites": 13,
+      "files": 3
+    },
+    {
+      "api": "@feltdb/feltkit/react useQueryState",
+      "callSites": 13,
+      "files": 2
+    },
+    {
+      "api": "@feltdb/feltkit fail",
+      "callSites": 11,
+      "files": 4
+    },
+    {
+      "api": "ctx.services.files",
+      "callSites": 6,
+      "files": 3
+    },
+    {
+      "api": "@feltdb/feltkit/react useFeltKit",
+      "callSites": 5,
+      "files": 2
+    },
+    {
+      "api": "@feltdb/feltkit DatabaseReader",
+      "callSites": 4,
+      "files": 1
+    },
+    {
+      "api": "@feltdb/feltkit feltkit",
+      "callSites": 4,
+      "files": 1
+    },
+    {
+      "api": "@feltdb/feltkit/testing TestApp",
+      "callSites": 4,
+      "files": 1
+    },
+    {
+      "api": "ctx.services.notifications",
+      "callSites": 4,
+      "files": 1
+    },
+    {
+      "api": "@feltdb/feltkit Doc",
+      "callSites": 3,
+      "files": 1
+    },
+    {
+      "api": "@feltdb/feltkit/client ResultOf",
+      "callSites": 3,
+      "files": 1
+    },
+    {
+      "api": "@feltdb/feltkit/react useSession",
+      "callSites": 3,
+      "files": 2
+    },
+    {
+      "api": "ctx.afterCommit.notifications",
+      "callSites": 3,
+      "files": 1
+    },
+    {
+      "api": "ctx.auth",
+      "callSites": 3,
+      "files": 3
+    },
+    {
+      "api": "@feltdb/feltkit QueryCtx",
+      "callSites": 2,
+      "files": 1
+    },
+    {
+      "api": "@feltdb/feltkit/client createClient",
+      "callSites": 2,
+      "files": 2
+    },
+    {
+      "api": "ctx.afterCommit.jobs",
+      "callSites": 2,
+      "files": 2
+    },
+    {
+      "api": "@feltdb/feltkit AuthorizeRequest",
+      "callSites": 1,
+      "files": 1
+    },
+    {
+      "api": "@feltdb/feltkit/client createApi",
+      "callSites": 1,
+      "files": 1
+    },
+    {
+      "api": "@feltdb/feltkit/client TokenStore",
+      "callSites": 1,
+      "files": 1
+    },
+    {
+      "api": "@feltdb/feltkit/react SignIn",
+      "callSites": 1,
+      "files": 1
+    },
+    {
+      "api": "@feltdb/feltkit/testing createArtifactTestApp",
+      "callSites": 1,
+      "files": 1
+    },
+    {
+      "api": "@feltdb/feltkit/testing createTestApp",
+      "callSites": 1,
+      "files": 1
+    }
+  ],
+  "findings": [],
+  "checks": [
+    {
+      "name": "generated code current",
+      "ok": true,
+      "detail": "feltkit/_generated/api.ts matches what codegen writes",
+      "fix": "npx feltkit codegen"
+    },
+    {
+      "name": "declarations match files",
+      "ok": true,
+      "detail": "0 declaration(s), each matches a file",
+      "fix": "Remove or correct the stale entries in feltkit.measure.json."
+    },
+    {
+      "name": "every code file classified",
+      "ok": true,
+      "detail": "every file with code has a class",
+      "fix": "Declare them in feltkit.measure.json with a class and a reason."
+    }
+  ],
+  "files": [
+    {
+      "path": ".gitignore",
+      "class": "configuration",
+      "basis": "configuration file",
+      "lines": 0,
+      "scaffold": "modified"
+    },
+    {
+      "path": "README.md",
+      "class": "excluded",
+      "basis": "documentation",
+      "lines": 0,
+      "scaffold": "modified"
+    },
+    {
+      "path": "docs/GAP-REGISTER.md",
+      "class": "excluded",
+      "basis": "documentation",
+      "lines": 0
+    },
+    {
+      "path": "docs/REPORT.md",
+      "class": "excluded",
+      "basis": "documentation",
+      "lines": 0
+    },
+    {
+      "path": "docs/SEED-PHOTOS.md",
+      "class": "excluded",
+      "basis": "documentation",
+      "lines": 0
+    },
+    {
+      "path": "e2e/frame.e2e.test.mjs",
+      "class": "tests",
+      "basis": "path: tests",
+      "lines": 223
+    },
+    {
+      "path": "feltkit.scaffold.json",
+      "class": "configuration",
+      "basis": "configuration file",
+      "lines": 29
+    },
+    {
+      "path": "feltkit/_frame.ts",
+      "class": "domain",
+      "basis": "path: feltkit/ (server functions)",
+      "lines": 80
+    },
+    {
+      "path": "feltkit/_generated/api.ts",
+      "class": "generated",
+      "basis": "codegen (matches regeneration)",
+      "lines": 7,
+      "scaffold": "modified"
+    },
+    {
+      "path": "feltkit/app.ts",
+      "class": "domain",
+      "basis": "path: feltkit/ (server functions)",
+      "lines": 69,
+      "scaffold": "modified"
+    },
+    {
+      "path": "feltkit/inbox.ts",
+      "class": "domain",
+      "basis": "path: feltkit/ (server functions)",
+      "lines": 41,
+      "scaffold": "modified"
+    },
+    {
+      "path": "feltkit/posts.ts",
+      "class": "domain",
+      "basis": "path: feltkit/ (server functions)",
+      "lines": 116
+    },
+    {
+      "path": "feltkit/profiles.ts",
+      "class": "domain",
+      "basis": "path: feltkit/ (server functions)",
+      "lines": 109
+    },
+    {
+      "path": "feltkit/social.ts",
+      "class": "domain",
+      "basis": "path: feltkit/ (server functions)",
+      "lines": 89
+    },
+    {
+      "path": "index.html",
+      "class": "experience",
+      "basis": "path: root (UI)",
+      "lines": 22,
+      "scaffold": "modified"
+    },
+    {
+      "path": "package-lock.json",
+      "class": "excluded",
+      "basis": "lockfile",
+      "lines": 4432
+    },
+    {
+      "path": "package.json",
+      "class": "configuration",
+      "basis": "configuration file",
+      "lines": 33,
+      "scaffold": "modified"
+    },
+    {
+      "path": "public/apple-touch-icon.png",
+      "class": "excluded",
+      "basis": "asset",
+      "lines": 0,
+      "scaffold": "modified"
+    },
+    {
+      "path": "public/favicon.png",
+      "class": "excluded",
+      "basis": "asset",
+      "lines": 0,
+      "scaffold": "modified"
+    },
+    {
+      "path": "public/theme.js",
+      "class": "generated",
+      "basis": "scaffold (create-feltkit 0.3.29, unmodified)",
+      "lines": 4,
+      "scaffold": "unmodified"
+    },
+    {
+      "path": "scripts/seed.ts",
+      "class": "infrastructure",
+      "basis": "path: scripts/ (app tooling)",
+      "lines": 163
+    },
+    {
+      "path": "src/App.tsx",
+      "class": "experience",
+      "basis": "path: src/ (UI)",
+      "lines": 143,
+      "scaffold": "modified"
+    },
+    {
+      "path": "src/components.tsx",
+      "class": "experience",
+      "basis": "path: src/ (UI)",
+      "lines": 148
+    },
+    {
+      "path": "src/lib.tsx",
+      "class": "experience",
+      "basis": "path: src/ (UI)",
+      "lines": 102
+    },
+    {
+      "path": "src/main.tsx",
+      "class": "generated",
+      "basis": "scaffold (create-feltkit 0.3.29, unmodified)",
+      "lines": 14,
+      "scaffold": "unmodified"
+    },
+    {
+      "path": "src/pages.tsx",
+      "class": "experience",
+      "basis": "path: src/ (UI)",
+      "lines": 395
+    },
+    {
+      "path": "src/styles.css",
+      "class": "experience",
+      "basis": "path: src/ (UI)",
+      "lines": 224,
+      "scaffold": "modified"
+    },
+    {
+      "path": "src/theme.tsx",
+      "class": "generated",
+      "basis": "scaffold (create-feltkit 0.3.29, unmodified)",
+      "lines": 46,
+      "scaffold": "unmodified"
+    },
+    {
+      "path": "tests/artifact.test.ts",
+      "class": "tests",
+      "basis": "path: tests",
+      "lines": 24
+    },
+    {
+      "path": "tests/frame.test.ts",
+      "class": "tests",
+      "basis": "path: tests",
+      "lines": 213
+    },
+    {
+      "path": "tsconfig.json",
+      "class": "configuration",
+      "basis": "configuration file",
+      "lines": 17,
+      "scaffold": "modified"
+    },
+    {
+      "path": "vite.config.ts",
+      "class": "generated",
+      "basis": "scaffold (create-feltkit 0.3.29, unmodified)",
+      "lines": 5,
+      "scaffold": "unmodified"
+    }
+  ]
+}
