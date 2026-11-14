@@ -3,8 +3,9 @@
 import { createApi } from "@feltdb/feltkit/client";
 import type * as app_module from "../app.js";
 import type * as inbox_module from "../inbox.js";
-import type * as projects_module from "../projects.js";
-import type * as tasks_module from "../tasks.js";
+import type * as posts_module from "../posts.js";
+import type * as profiles_module from "../profiles.js";
+import type * as social_module from "../social.js";
 
 /** Typed references to every query and mutation. Type-only imports: no backend code reaches the browser. */
-export const api = createApi<{ "app": typeof app_module; "inbox": typeof inbox_module; "projects": typeof projects_module; "tasks": typeof tasks_module }>();
+export const api = createApi<{ "app": typeof app_module; "inbox": typeof inbox_module; "posts": typeof posts_module; "profiles": typeof profiles_module; "social": typeof social_module }>();

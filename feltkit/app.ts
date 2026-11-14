@@ -1,73 +1,99 @@
 /**
- * The application: its name, who may do what, and its data.
+ * Frame: a photo-sharing social network on FeltKit.
  *
- * Everything here is stored in one FeltDB instance per environment. In development
- * that is .feltkit/development/state — run `npx feltkit inspect` to see it.
+ * Everything below is declaration. FeltDB stores and enforces the collections (types, references,
+ * unique constraints, indexes); AppPort enforces the roles on every interface (HTTP, /appport, /mcp);
+ * AppPort Services provides files (photos) and notifications. The one piece of policy Frame writes
+ * itself is `authorize`: who owns which record.
  */
-import { feltkit, s } from "@feltdb/feltkit";
+import { feltkit, s, type AuthorizeRequest } from "@feltdb/feltkit";
 
 export const app = feltkit({
   name: "frame",
-  description: "A small task manager that demonstrates the whole FeltKit platform.",
-  // Roles grant AppPort permissions. "tasks.*" grants every tasks.<x> permission.
+  description: "Frame: share photos, follow people, like and comment.",
   roles: {
-    // Members use the app and Studio's agent (feltkit.agent.*: create, approve, and follow agent tasks).
-    // notifications.*: a principal reads, marks, and dismisses only its own notifications.
-    // webhooks.emit + webhooks.deliver: their changes notify registered endpoints (task.created,
-    // task.completed); each delivery runs as the person whose change emitted it.
-    member: ["projects.*", "tasks.*", "files.*", "notifications.*", "webhooks.emit", "webhooks.deliver", "feltkit.agent.*"],
-    // Viewers read. They can see agent tasks but not start or approve them.
-    viewer: ["projects.read", "tasks.read", "files.read", "notifications.read", "feltkit.agent.read"],
-    // Agents can read, complete tasks, and leave notes. They cannot create or delete.
-    // feltkit.agent.*: discover the app (feltkit_context), work tasks, propose actions; a person approves.
-    agent: ["projects.read", "tasks.read", "tasks.complete", "tasks.note", "files.read", "files.write", "notifications.send", "webhooks.emit", "webhooks.deliver", "feltkit.agent.*"],
-    // Admins configure the app in Studio → Services: the model (intelligence.*), stored
-    // credentials (credential.*), configuration, API keys, webhooks, jobs, and schedules.
-    // Credentials are stored by reference; the value never enters FeltDB.
-    // feltkit.operations.*: in production, admins are Studio's operators (npx feltkit operator grant).
-    admin: ["intelligence.*", "credential.*", "configuration.*", "apikeys.*", "webhooks.*", "jobs.*", "schedules.*", "feltkit.operations.*"],
+    // Every account is a member. frame.read/frame.write are Frame's own permissions; the service
+    // permissions are what Frame's functions use on the caller's behalf (photos, notifications).
+    member: ["frame.read", "frame.write", "files.read", "files.write", "files.delete", "notifications.read", "notifications.update", "notifications.send", "jobs.create", "jobs.execute"],
+    // Studio operators: configure services, read the app. No Frame write access.
+    admin: ["frame.read", "configuration.*", "jobs.*", "feltkit.operations.*", "feltkit.agent.*"],
   },
-  // People sign up and sign in with an e-mail address and a password (stored in this app's FeltDB;
-  // only a hash of the password). A new account is a member.
+  // Built-in accounts: e-mail + password, scrypt-hashed, sessions in an HttpOnly cookie.
   auth: { accounts: { roles: ["member"] } },
-  // Development-only identities. Sign in as them from the app or the dashboard.
   dev: {
     users: [
       { id: "ada", name: "Ada Lovelace", roles: ["member", "admin"] },
-      { id: "grace", name: "Grace Hopper", roles: ["viewer"] },
+      { id: "grace", name: "Grace Hopper", roles: ["member"] },
     ],
   },
-  // AppPort Services, stored in this app's FeltDB instance, each configured in Studio →
-  // Services. Intelligence is the model the agent decides with (Studio → Models).
   services: {
-    files: true,
-    // The types this app sends; Studio offers them when you send one by hand.
-    notifications: { types: ["task.completed"] },
-    configuration: true,
-    // A request authenticated by an API key holds these roles.
-    apiKeys: { roles: ["member"] },
-    // The events this app emits (feltkit/tasks.ts); Studio offers them when you register an endpoint.
-    webhooks: { events: ["task.created", "task.completed"] },
-    // Job type → the mutation that runs it, as the principal that queued it, with retries.
-    jobs: { handlers: { "projects.clear-completed": "projects:clearCompleted" } },
-    schedules: true,
-    intelligence: true,
+    // Photos up to 4 MB (the browser resizes to 1440 px JPEG before upload; typical 200–600 KB).
+    files: { maxBytes: 4 * 1024 * 1024 },
+    notifications: { types: ["post.liked", "post.commented", "user.followed"] },
+    // Removing a deleted post's photo runs after the delete commits, as the person who deleted it.
+    jobs: { handlers: { "media.release": "posts:releaseMedia" } },
   },
+  authorize: ownership,
 });
 
-export const projects = app.collection("projects", {
-  name: s.string({ minLength: 1, maxLength: 80 }),
-  createdAt: s.number(),
-  createdBy: s.string(),
-});
+export const profiles = app.collection(
+  "profiles",
+  {
+    /** The principal (account) this profile belongs to. One profile per principal. */
+    userId: s.string(),
+    username: s.string({ minLength: 3, maxLength: 30, pattern: "^[a-z0-9._]+$" }),
+    displayName: s.string({ minLength: 1, maxLength: 60 }),
+    bio: s.optional(s.string({ maxLength: 300 })),
+    avatarFileId: s.optional(s.string()),
+    createdAt: s.number(),
+  },
+  { unique: [["userId"], ["username"]], indexes: [{ fields: ["createdAt"] }], search: ["username", "displayName"] },
+);
 
-export const tasks = app.collection("tasks", {
-  projectId: s.string(),
-  title: s.string({ minLength: 1, maxLength: 200 }),
-  details: s.optional(s.string({ maxLength: 4000 })),
-  done: s.boolean(),
-  createdAt: s.number(),
-  createdBy: s.string(),
-  completedAt: s.optional(s.number()),
-  completedBy: s.optional(s.string()),
-});
+export const posts = app.collection(
+  "posts",
+  {
+    authorId: s.ref(profiles),
+    fileId: s.string(),
+    caption: s.string({ maxLength: 2200 }),
+    width: s.integer({ minimum: 1 }),
+    height: s.integer({ minimum: 1 }),
+    createdAt: s.number(),
+  },
+  { unique: [["fileId"]], indexes: [{ fields: ["authorId", "createdAt"] }, { fields: ["createdAt"] }], search: ["caption"] },
+);
+
+export const follows = app.collection(
+  "follows",
+  { followerId: s.ref(profiles), followeeId: s.ref(profiles), createdAt: s.number() },
+  { unique: [["followerId", "followeeId"]], indexes: [{ fields: ["followeeId"] }] },
+);
+
+export const likes = app.collection(
+  "likes",
+  { postId: s.ref(posts), profileId: s.ref(profiles), createdAt: s.number() },
+  { unique: [["postId", "profileId"]] },
+);
+
+export const comments = app.collection(
+  "comments",
+  { postId: s.ref(posts), authorId: s.ref(profiles), text: s.string({ minLength: 1, maxLength: 1000 }), createdAt: s.number() },
+  { indexes: [{ fields: ["postId", "createdAt"] }] },
+);
+
+/**
+ * Per-record ownership, enforced for every caller on every interface (HTTP, AppPort, MCP), after
+ * the role check and argument validation, before the handler. Every other Frame mutation acts on
+ * the caller's own profile, derived from the verified principal, so it cannot name another user.
+ * An unknown id is refused exactly like someone else's, so a refusal reveals nothing.
+ */
+async function ownership({ function: fn, args, principal, db }: AuthorizeRequest) {
+  // Function name ("<module>:<export>") → the collection whose record `args.id` must be the caller's.
+  // tests/frame.test.ts proves each entry is enforced; a renamed function fails those tests.
+  const owned = ({ "posts:remove": posts, "social:uncomment": comments } as const)[fn as "posts:remove"];
+  if (!owned) return true;
+  const [me] = principal ? await db.find(profiles, { userId: principal.id }) : [];
+  const record = await db.get(owned, String(args.id));
+  if (me && record?.authorId === me.id) return true;
+  return { allowed: false as const, code: "FORBIDDEN" as const, reason: "Only its author can delete this." };
+}
