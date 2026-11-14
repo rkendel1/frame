@@ -11,7 +11,8 @@
     "inspect": "feltkit inspect",
     "deploy": "feltkit deploy",
     "typecheck": "tsc --noEmit",
-    "seed": "node scripts/seed.ts"
+    "seed": "node scripts/seed.ts",
+    "test:e2e": "feltkit build && node --test --test-concurrency=1 e2e/*.test.mjs"
   },
   "dependencies": {
     "@feltdb/feltkit": "^0.3.29",
