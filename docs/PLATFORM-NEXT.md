@@ -8,8 +8,8 @@ install from npm until they are released.
 |---|---|---|---|
 | `@feltdb/feltkit` | rkendel1/feltkit | `f49a40e` (on `23c59e0`) | cacheable links, image variants, `decide` mapping, `ctx.db` `in`, `notifications.page/unreadCount/markAllRead`, per-agent grants |
 | `@appport/services` | rkendel1/appport-services | `110d72a` | inbox paging, unread count, mark-all-read (contract v4) |
-| `@feltdb/core` | rkendel1/flow_db | `930bc64` | `in` conditions, ordered index merge |
-| `@authboundry/local` | rkendel1/authboundry | `001ce42` | per-agent registration and grants |
+| `@feltdb/core` | rkendel1/flow_db | `e45cc00` (on `930bc64`, `9e42687`) | `in` conditions, ordered index merge; queries with no `orderBy` return record-id order and read only the matching index group |
+| `@authboundry/local` | rkendel1/authboundry | `cb229b4` (on `001ce42`) | per-agent registration and grants; creating an agent never overwrites a principal (security) |
 
 ## What changed in Frame, and the workaround each removes
 
@@ -41,6 +41,10 @@ Results on 2026-11-16: `tsc` clean; **20 / 20** integration tests (two new: the 
 proven with `explain` and examined-record counts; stable cached links and sizes); **8 / 8** e2e on the
 production build (cache headers, 304, a derived `grid` image over HTTP, per-agent delegation decided
 by the production AuthBoundry, revocation surviving a restart).
+
+Re-verified with FeltDB `e45cc00`: 20 / 20 and 8 / 8. With `9e42687` alone, four of Frame's reads with no
+`orderBy` (follows by follower, comments by post, memberships by community, posts by author) became full
+scans; `e45cc00` reads only the matching index group instead (`index-group`, proven with `explain`).
 
 ## Before merging this into main
 
