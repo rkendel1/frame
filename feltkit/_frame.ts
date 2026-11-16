@@ -210,7 +210,8 @@ export async function page(db: DatabaseReader, viewer: ProfileDoc | null, opts: 
 
 // ------------------------------------------------------------------------------------------- text
 
-const MENTION = /@([a-z0-9._]{3,30})/g;
+/** A mention never ends with ".": "@sol.reyes." at the end of a sentence names sol.reyes. */
+const MENTION = /@([a-z0-9._]{2,29}[a-z0-9_])/g;
 const TOPIC = /#([\p{L}\p{N}_]{2,40})/gu;
 export const topicsIn = (text: string) => [...new Set([...text.matchAll(TOPIC)].map((m) => m[1]!.toLowerCase()))].slice(0, 10);
 export const mentionsIn = (text: string) => [...new Set([...text.matchAll(MENTION)].map((m) => m[1]!))].slice(0, 10);

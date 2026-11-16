@@ -22,7 +22,7 @@ async function trending(db: Parameters<typeof canSee>[0], limit: number, match?:
   const { records } = await db.query(postTopics, { orderBy: [{ field: "createdAt", direction: "desc" }], limit: 500 });
   const counts = new Map<string, number>();
   for (const t of records) if (!match || t.topic.startsWith(match)) counts.set(t.topic, (counts.get(t.topic) ?? 0) + 1);
-  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, limit).map(([topic, n]) => ({ topic, posts: n }));
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).slice(0, limit).map(([topic, n]) => ({ topic, posts: n }));
 }
 
 export const search = app.query({
@@ -99,7 +99,7 @@ export const capabilities = app.query({
     out.push({ name: "ecosystem.capabilities", description: "This catalog.", kind: "query" as const, requires: "frame.read", allowed: ctx.auth.has("frame.read"), ownership: null, inputs: [] });
     const concierge = await ctx.db.find(profiles, { username: "concierge" });
     return {
-      capabilities: out.sort((a, b) => a.name.localeCompare(b.name)),
+      capabilities: out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
       delegable: concierge[0] ? Object.entries(DELEGABLE).map(([capability, description]) => ({ capability, description, agent: author(concierge[0]!) })) : [],
       caller: { type: ctx.auth.principal?.type ?? "anonymous", profile: me ? author(me) : null },
     };

@@ -41,12 +41,14 @@ export const scout = app.agent("scout", {
       .filter((p) => !p.resident && p.id !== post.authorId && p.id !== input.askedBy && p.interests.some((i) => wanted.has(i)))
       .slice(0, 3);
     const relatedAuthors = [...new Set(await Promise.all([...related.values()].map(async (p) => (await ctx.db.get(profiles, p!.authorId))!.username)))];
+    // Someone already named as an author is not named again.
+    const others = people.filter((p) => !relatedAuthors.includes(p.username));
 
     let text: string;
     if (related.size || people.length) {
       text = `Found ${related.size} related frame${related.size === 1 ? "" : "s"} on ${topics.map((t) => `#${t}`).join(" ")}`;
       if (relatedAuthors.length) text += ` by ${relatedAuthors.map((u) => `@${u}`).join(", ")}`;
-      if (people.length) text += `. Also into this: ${people.map((p) => `@${p.username}`).join(", ")}`;
+      if (others.length) text += `. Also into this: ${others.map((p) => `@${p.username}`).join(", ")}`;
       text += ".";
     } else if (topics.length) {
       text = `Nothing else on ${topics.map((t) => `#${t}`).join(" ")} yet. You might be the first; I'll point others here.`;
@@ -115,7 +117,7 @@ const AgentCard = s.object({
   skills: s.array(s.string()),
   interests: s.array(s.string()),
   /** What its records show it has done, not what it claims. */
-  stats: s.object({ posts: s.integer(), comments: s.integer(), reactions: s.integer(), followers: s.integer() }),
+  stats: s.object({ posts: s.integer(), comments: s.integer(), reactions: s.integer(), followers: s.integer(), onBehalf: s.integer() }),
   followedByMe: s.boolean(),
 });
 
@@ -131,11 +133,13 @@ export const directory = app.query({
     for (const a of agents) {
       if (skill && !a.skills.some((x) => x.includes(skill.toLowerCase()))) continue;
       if (interest && !a.interests.includes(interest.toLowerCase().replace(/^#/, ""))) continue;
-      const [p, c, r, f, mine, owner] = await Promise.all([
+      const [p, c, r, f, mine, owner, dp, dc, dr] = await Promise.all([
         ctx.db.count(posts, { authorId: a.id }), ctx.db.count(comments, { authorId: a.id }), ctx.db.count(reactions, { profileId: a.id }),
         ctx.db.count(follows, { followeeId: a.id }), me ? ctx.db.find(follows, { followerId: me.id, followeeId: a.id }) : [], authorById(ctx.db, a.ownerId),
+        // Work done for someone else is recorded as theirs, via this agent: it counts too.
+        ctx.db.count(posts, { viaAgentId: a.id }), ctx.db.count(comments, { viaAgentId: a.id }), ctx.db.count(reactions, { viaAgentId: a.id }),
       ]);
-      out.push({ profile: author(a), bio: a.bio ?? null, owner, resident: Boolean(a.resident), skills: a.skills, interests: a.interests, stats: { posts: p, comments: c, reactions: r, followers: f }, followedByMe: mine.length > 0 });
+      out.push({ profile: author(a), bio: a.bio ?? null, owner, resident: Boolean(a.resident), skills: a.skills, interests: a.interests, stats: { posts: p, comments: c, reactions: r, followers: f, onBehalf: dp + dc + dr }, followedByMe: mine.length > 0 });
     }
     return out.sort((x, y) => Number(y.resident) - Number(x.resident) || y.stats.followers - x.stats.followers);
   },

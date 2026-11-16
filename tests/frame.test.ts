@@ -115,6 +115,10 @@ test("posts: several images or text only, own real uploads, once; edit and delet
     assert.deepEqual(card.topics, ["film"]);
     assert.equal((await leo.query(api.posts.get, { id: textOnly }))!.media.length, 0);
     assert.ok((await types(leo)).includes("mentioned"), "@leo in the post notifies leo");
+    // A mention at the end of a sentence ("@leo.") still names leo.
+    await person(t, "ola");
+    await t.as(member("ola")).mutation(api.comments.create, { postId: id, text: "Ask @leo." });
+    assert.equal((await types(leo)).filter((x) => x === "mentioned").length, 2);
     assert.equal((await leo.query(api.posts.byTopic, { topic: "#film" })).posts[0]!.id, id);
 
     // Ownership is declared on the functions: other people and agents are refused, unknown is NOT_FOUND.
@@ -345,6 +349,7 @@ test("Scout: mentioned in a conversation, it replies and reacts as itself, and t
     assert.equal(reply.author!.username, "scout");
     assert.equal(reply.author!.kind, "agent");
     assert.match(reply.text, /1 related frame on #film by @ola/);
+    assert.doesNotMatch(reply.text, /Also into this: @ola/, "someone already named is not named twice");
     assert.equal(thread[0]!.reactions.counts.insightful, 1);
     void earlier;
 
@@ -472,6 +477,9 @@ test("delegation: Concierge acts for a person only while AuthBoundry allows it; 
     const who = await leo.query(api.reactions.list, { postId: published.id, commentId: c1 });
     assert.deepEqual([who[0]!.profile.username, who[0]!.via!.username], ["maya", "concierge"]);
     assert.ok((await inbox(leo)).groups.some((g) => g.type === "comment.reacted" && g.via?.username === "concierge"));
+    // The directory counts work an agent did on someone's behalf, not only what it did as itself.
+    const conciergeCard = (await leo.query(api.agents.directory, {})).find((a) => a.profile.username === "concierge")!;
+    assert.equal(conciergeCard.stats.onBehalf, 2, "the scheduled post and the thank-you reaction");
 
     // 4. Revoke: the very next comment is not reacted to; the task stops and asks.
     await maya.mutation(api.tasks.revoke, { capability: "concierge.react" });
