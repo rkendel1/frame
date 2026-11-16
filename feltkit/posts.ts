@@ -3,7 +3,7 @@
  * declared on the function (`owner`): FeltKit checks it on every interface before the handler runs.
  */
 import { fail, s } from "@feltdb/feltkit";
-import { app, comments, follows, media, postTopics, posts, profiles, reactions } from "./app.js";
+import { app, comments, follows, media, memberships, postTopics, posts, profiles, reactions, tasks } from "./app.js";
 import { FeedPage, GridPage, PostCard, canSee, cards, gridItems, myProfile, ownImage, page, requireProfile, visiblePost } from "./_frame.js";
 import { publish, retopic } from "./_social.js";
 
@@ -25,14 +25,14 @@ export const uploadLink = app.mutation({
 /** Publish: up to 10 of the caller's own uploaded images, and/or text. #topics and @mentions are recognised. */
 export const create = app.mutation({
   access: "frame.write",
-  args: { text: s.string({ maxLength: 2200 }), media: s.optional(MediaInput), visibility: s.optional(Visibility) },
+  args: { text: s.string({ maxLength: 2200 }), media: s.optional(MediaInput), visibility: s.optional(Visibility), communityId: s.optional(s.string()) },
   returns: s.string(),
-  capability: { name: "posts.create", description: "Publish a post as the caller: text and/or up to 10 images uploaded through posts.uploadlink. #topic and @username are recognised. visibility: public (default) or followers." },
-  handler: async (ctx, { text, media: images = [], visibility = "public" }) => {
+  capability: { name: "posts.create", description: "Publish a post as the caller: text and/or up to 10 images uploaded through posts.uploadlink. #topic and @username are recognised. visibility: public (default) or followers. communityId: post into a community the caller belongs to." },
+  handler: async (ctx, { text, media: images = [], visibility = "public", communityId }) => {
     const me = await requireProfile(ctx);
     if (new Set(images.map((m) => m.fileId)).size !== images.length) fail("INVALID_ARGUMENT", "Each image can appear once.");
     for (const m of images) await ownImage(ctx, m.fileId, me.userId, "post");
-    return publish(ctx, me, { text, visibility, media: images });
+    return publish(ctx, me, { text, visibility, media: images, ...(communityId ? { communityId } : {}) });
   },
 });
 
@@ -93,13 +93,19 @@ export const feed = app.query({
   access: "frame.read",
   args: { cursor: s.optional(s.number()), limit: s.optional(s.integer({ minimum: 1, maximum: 30 })) },
   returns: FeedPage,
-  capability: { name: "feed.home", description: "The caller's home feed: their own and followed people's and agents' posts, newest first. Pass nextCursor back as cursor for more." },
+  capability: { name: "feed.home", description: "The caller's home feed: their own posts, followed people's and agents' posts, and posts in communities they joined, newest first. Pass nextCursor back as cursor for more." },
   handler: async (ctx, { cursor, limit = 10 }) => {
     const me = await myProfile(ctx);
     if (!me) return { posts: [], nextCursor: null };
     const authors = [me.id, ...(await ctx.db.find(follows, { followerId: me.id })).map((f) => f.followeeId)];
-    const pages = await Promise.all(authors.map((authorId) => page(ctx.db, me, { authorId, before: cursor, limit })));
-    const merged = pages.flatMap((p) => p.items).sort((a, b) => b.createdAt - a.createdAt);
+    const joined = (await ctx.db.find(memberships, { profileId: me.id })).map((m) => m.communityId);
+    const pages = await Promise.all([
+      ...authors.map((authorId) => page(ctx.db, me, { authorId, before: cursor, limit })),
+      ...joined.map((communityId) => page(ctx.db, me, { communityId, before: cursor, limit })),
+    ]);
+    // A post can arrive by both routes (a followed author posting in a joined community): once.
+    const seen = new Set<string>();
+    const merged = pages.flatMap((p) => p.items).filter((p) => !seen.has(p.id) && seen.add(p.id)).sort((a, b) => b.createdAt - a.createdAt);
     const items = merged.slice(0, limit);
     const more = merged.length > limit || pages.some((p) => p.nextCursor !== null);
     return { posts: await cards(ctx.db, items, me.id), nextCursor: more && items.length ? items[items.length - 1]!.createdAt : null };
@@ -183,7 +189,7 @@ export const mediaLink = app.query({
 /**
  * Background job "media.release": removes a photo once nothing refers to it. Queued by posts:remove
  * and profiles:update with ctx.afterCommit, so it runs only if they committed, as the person who
- * queued it (the file's owner). `files.remove` (FeltKit 0.3.30) records the byte release durably and
+ * queued it (the file's owner). Queued too by tasks:cancel for a scheduled post's images. `files.remove` (FeltKit 0.3.30) records the byte release durably and
  * keeps bytes another file still references; it commits on its own, which is why it runs here, after
  * the delete, and not inside it (FRAME-GAP-09).
  */
@@ -195,6 +201,12 @@ export const releaseMedia = app.mutation({
     const inUse = (await ctx.db.count(media, { fileId })) + (await ctx.db.count(profiles, { avatarFileId: fileId }));
     const file = await ctx.services.files.get(fileId).catch(() => null);
     if (inUse || !file || file.owner !== ctx.auth.requirePrincipal().id) return { removed: false };
+    // A scheduled post that may still be published keeps its images (the caller's own tasks only).
+    const [me] = await ctx.db.find(profiles, { userId: file.owner });
+    for (const status of ["scheduled", "needs_permission", "failed"] as const) {
+      const pending = me ? await ctx.db.find(tasks, { ownerId: me.id, kind: "publish", status }) : [];
+      if (pending.some((t) => t.draft?.media.some((m) => m.fileId === fileId))) return { removed: false };
+    }
     await ctx.services.files.remove(fileId);
     return { removed: true };
   },

@@ -11,7 +11,7 @@ import { api } from "../feltkit/_generated/api";
 import { AgentGlyph, Avatar, Link, Photo, REACTIONS, RichText, ago, emoji, navigate, plural, prepareImage, type Participant, type ReactionKind } from "./lib";
 
 export type Card = ResultOf<typeof api.posts.feed>["posts"][number];
-export type CommentItem = ResultOf<typeof api.comments.thread>[number];
+export type CommentItem = ResultOf<typeof api.comments.thread>["comments"][number];
 type Summary = Card["reactions"];
 type GridPost = ResultOf<typeof api.posts.recent>["posts"][number];
 
@@ -205,7 +205,7 @@ export function Carousel({ media, alt, onDoubleClick }: { media: Card["media"]; 
   );
 }
 
-export function Byline({ who, via, at, visibility, edited }: { who: Participant; via?: Participant | null; at: number; visibility?: string; edited?: boolean }) {
+export function Byline({ who, via, at, visibility, edited, community }: { who: Participant; via?: Participant | null; at: number; visibility?: string; edited?: boolean; community?: { slug: string; name: string } | null }) {
   return (
     <div className="byline">
       <Link to={`/u/${who.username}`}><Avatar user={who} size={36} /></Link>
@@ -216,6 +216,7 @@ export function Byline({ who, via, at, visibility, edited }: { who: Participant;
           {edited && " · edited"}
           {visibility === "followers" ? <span title="Followers only"> · <Users size={11} /></span> : visibility === "public" ? <span title="Public"> · <Globe size={11} /></span> : null}
           {via && <> · <Via agent={via} /></>}
+          {community && <> · <Link to={`/c/${community.slug}`} className="in-community">c/{community.slug}</Link></>}
         </span>
       </div>
     </div>
@@ -233,7 +234,7 @@ export function PostCard({ post }: { post: Card }) {
   return (
     <article className={`post-card ${post.author.kind === "agent" ? "by-agent" : ""}`}>
       <header className="post-head">
-        <Byline who={post.author} via={post.via} at={post.createdAt} visibility={post.visibility} edited={post.editedAt !== null} />
+        <Byline who={post.author} via={post.via} at={post.createdAt} visibility={post.visibility} edited={post.editedAt !== null} community={post.community} />
         {post.mine && <PostMenu post={post} />}
       </header>
       {post.media.length > 0 && (
@@ -330,31 +331,57 @@ function QuickComment({ postId }: { postId: string }) {
 // ── Conversation ───────────────────────────────────────────────────────────────────────────
 type ThreadNode = CommentItem & { children: ThreadNode[] };
 
+/**
+ * The conversation, a page of top-level comments at a time (each page live, with its replies).
+ * A deep link to a comment on a later page keeps loading pages until it is found.
+ */
 export function Conversation({ postId, focus }: { postId: string; focus?: string }) {
-  const thread = useQueryState(api.comments.thread, { postId });
+  const [cursors, setCursors] = useState<Array<string | undefined>>([undefined]);
+  const [next, setNext] = useState<string | null>(null);
+  const [found, setFound] = useState(!focus);
   const [replyTo, setReplyTo] = useState<CommentItem | null>(null);
-  const tree = useMemo(() => {
-    const byId = new Map<string, ThreadNode>();
-    for (const c of thread.data ?? []) byId.set(c.id, { ...c, children: [] });
-    const roots: ThreadNode[] = [];
-    for (const n of byId.values()) (n.parentId && byId.get(n.parentId) ? byId.get(n.parentId)!.children : roots).push(n);
-    return roots;
-  }, [thread.data]);
+  const more = () => next && !cursors.includes(next) && setCursors((c) => [...c, next]);
   useEffect(() => {
-    if (!focus || !thread.data) return;
-    const el = document.getElementById(`c-${focus}`);
-    el?.scrollIntoView({ block: "center", behavior: "smooth" });
-    el?.classList.add("flash");
-  }, [focus, thread.data !== undefined]);
-  if (thread.error) return <Failure error={thread.error} />;
-  if (!thread.data) return <Spinner />;
+    if (!found && next) more();
+  }, [found, next]);
   return (
     <section className="conversation" aria-label="Conversation">
-      {tree.length === 0 && <p className="muted center small">No comments yet. Start the conversation, or ask <Link className="token" to="/u/scout">@scout</Link> what it's related to.</p>}
-      <ul className="thread">{tree.map((n) => <CommentNode key={n.id} node={n} depth={0} postId={postId} onReply={setReplyTo} />)}</ul>
+      {cursors.map((c, i) => (
+        <ThreadPage key={c ?? "first"} postId={postId} cursor={c} focus={focus} onReply={setReplyTo}
+          onLoaded={(n, hasFocus) => {
+            if (hasFocus) setFound(true);
+            if (i === cursors.length - 1) setNext(n);
+          }} />
+      ))}
+      {next && found && <button className="secondary small more-comments" onClick={more}>More comments</button>}
       <Composer postId={postId} replyTo={replyTo} onDone={() => setReplyTo(null)} />
     </section>
   );
+}
+
+function ThreadPage({ postId, cursor, focus, onReply, onLoaded }: { postId: string; cursor?: string; focus?: string; onReply: (c: CommentItem) => void; onLoaded: (next: string | null, hasFocus: boolean) => void }) {
+  const page = useQueryState(api.comments.thread, { postId, limit: 20, ...(cursor ? { cursor } : {}) });
+  const tree = useMemo(() => {
+    const byId = new Map<string, ThreadNode>();
+    for (const c of page.data?.comments ?? []) byId.set(c.id, { ...c, children: [] });
+    const roots: ThreadNode[] = [];
+    for (const n of byId.values()) (n.parentId && byId.get(n.parentId) ? byId.get(n.parentId)!.children : roots).push(n);
+    return roots;
+  }, [page.data]);
+  const hasFocus = Boolean(focus && page.data?.comments.some((c) => c.id === focus));
+  useEffect(() => {
+    if (page.data) onLoaded(page.data.nextCursor, hasFocus);
+  }, [page.data?.nextCursor, page.data !== undefined, hasFocus]);
+  useEffect(() => {
+    if (!hasFocus) return;
+    const el = document.getElementById(`c-${focus}`);
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    el?.classList.add("flash");
+  }, [hasFocus]);
+  if (page.error) return <Failure error={page.error} />;
+  if (!page.data) return <Spinner />;
+  if (!cursor && tree.length === 0) return <p className="muted center small">No comments yet. Start the conversation, or ask <Link className="token" to="/u/scout">@scout</Link> what it's related to.</p>;
+  return <ul className="thread">{tree.map((n) => <CommentNode key={n.id} node={n} depth={0} postId={postId} onReply={onReply} />)}</ul>;
 }
 
 function CommentNode({ node, depth, postId, onReply }: { node: ThreadNode; depth: number; postId: string; onReply: (c: CommentItem) => void }) {

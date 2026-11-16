@@ -4,7 +4,7 @@
  * Nothing is mocked. Agent runs happen after a commit, detached; `settle` waits for them by polling
  * durable state (bounded), never by sleeping a fixed time.
  */
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { createTestApp, type TestApp } from "@feltdb/feltkit/testing";
 import { api } from "../feltkit/_generated/api.js";
@@ -55,6 +55,8 @@ async function settle<T>(read: () => Promise<T>, done: (v: T) => boolean, ms = 8
   return v;
 }
 
+/** Every comment on a post (one page of up to 50 conversations). */
+const comments = async (who: ReturnType<TestApp["as"]>, postId: string) => (await who.query(api.comments.thread, { postId, limit: 50 })).comments;
 const inbox = (who: ReturnType<TestApp["as"]>, filter?: "all" | "unread" | "mentions" | "agents") => who.query(api.inbox.list, { limit: 50, ...(filter ? { filter } : {}) });
 const types = async (who: ReturnType<TestApp["as"]>) => (await inbox(who)).groups.map((g) => g.type);
 
@@ -190,7 +192,7 @@ test("conversation: post → comment → reply → reactions on comments; the ri
     await leo.mutation(api.reactions.set, { postId, commentId: r1, kind: "insightful" });
     await assert.rejects(ola.mutation(api.comments.create, { postId, text: "x", parentId: "missing" }), { code: "NOT_FOUND" });
 
-    const thread = await maya.query(api.comments.thread, { postId });
+    const thread = await comments(maya, postId);
     assert.deepEqual(thread.map((c) => [c.text, c.parentId]), [["Gorgeous grain.", null], ["Which stock? @maya", c1]]);
     assert.equal(thread[0]!.replyCount, 1);
     assert.equal(thread[0]!.reactions.counts.like, 1);
@@ -212,13 +214,13 @@ test("conversation: post → comment → reply → reactions on comments; the ri
     await assert.rejects(ola.mutation(api.comments.update, { id: c1, text: "hijack" }), { code: "FORBIDDEN" });
     await leo.mutation(api.comments.update, { id: c1, text: "Gorgeous grain!" });
     assert.deepEqual(await leo.mutation(api.comments.remove, { id: c1 }), { id: c1, tombstone: true });
-    let after = await maya.query(api.comments.thread, { postId });
+    let after = await comments(maya, postId);
     assert.equal(after[0]!.deleted, true);
     assert.equal(after[0]!.text, "");
     assert.equal(after[0]!.author, null);
     assert.equal(after[0]!.reactions.total, 0, "a deleted comment's reactions go with it");
     await ola.mutation(api.comments.remove, { id: r1 });
-    after = await maya.query(api.comments.thread, { postId });
+    after = await comments(maya, postId);
     assert.equal(after.length, 0, "the tombstone goes when its last reply does");
     // Old notifications no longer show deleted text.
     assert.ok((await inbox(maya)).groups.every((g) => g.snippet !== "Gorgeous grain."));
@@ -343,7 +345,7 @@ test("Scout: mentioned in a conversation, it replies and reacts as itself, and t
     const postId = await post(t, "maya", "Morning #film");
     const ask = await leo.mutation(api.comments.create, { postId, text: "@scout anything like this?" });
 
-    const thread = await settle(() => maya.query(api.comments.thread, { postId }), (c) => c.length === 2);
+    const thread = await settle(() => comments(maya, postId), (c) => c.length === 2);
     const reply = thread[1]!;
     assert.equal(reply.parentId, ask);
     assert.equal(reply.author!.username, "scout");
@@ -377,7 +379,7 @@ test("Scout respects visibility: mentioned on a followers-only post it cannot se
     await t.runtime.runServices();
     await new Promise((r) => setTimeout(r, 300));
     await t.runtime.runServices();
-    assert.equal((await maya.query(api.comments.thread, { postId })).length, 1);
+    assert.equal((await comments(maya, postId)).length, 1);
   }));
 
 test("external agents: participate over the same capabilities, ask a person to own them, are accountable", () =>
@@ -393,7 +395,7 @@ test("external agents: participate over the same capabilities, ask a person to o
     const c = await bot.mutation(api.comments.create, { postId, text: "Palette: #1d2b53 #7e2553 #ff77a8" });
     // Agent to agent: Lumen mentions Scout; Scout answers Lumen.
     await bot.mutation(api.comments.create, { postId, text: "@scout related?", parentId: c });
-    await settle(() => maya.query(api.comments.thread, { postId }), (x) => x.some((y) => y.author?.username === "scout"));
+    await settle(() => comments(maya, postId), (x) => x.some((y) => y.author?.username === "scout"));
 
     const g = (await inbox(maya, "agents")).groups;
     assert.ok(g.some((x) => x.type === "post.reacted" && x.actors[0]!.kind === "agent"));
@@ -472,7 +474,7 @@ test("delegation: Concierge acts for a person only while AuthBoundry allows it; 
     await maya.mutation(api.tasks.grant, { capability: "concierge.react" });
     const standing = await maya.mutation(api.tasks.create, { kind: "react" });
     const c1 = await leo.mutation(api.comments.create, { postId: published.id, text: "Nice!" });
-    const thread = await settle(() => leo.query(api.comments.thread, { postId: published.id }), (x) => x[0]!.reactions.total === 1);
+    const thread = await settle(() => comments(leo, published.id), (x) => x[0]!.reactions.total === 1);
     assert.equal(thread[0]!.reactions.counts.support, 1);
     const who = await leo.query(api.reactions.list, { postId: published.id, commentId: c1 });
     assert.deepEqual([who[0]!.profile.username, who[0]!.via!.username], ["maya", "concierge"]);
@@ -486,7 +488,7 @@ test("delegation: Concierge acts for a person only while AuthBoundry allows it; 
     const c2 = await leo.mutation(api.comments.create, { postId: published.id, text: "Still nice" });
     mine = await settle(() => maya.query(api.tasks.list), (l) => l.find((x) => x.id === standing)!.status === "needs_permission");
     assert.match(mine.find((x) => x.id === standing)!.error!, /revoked/);
-    const t2 = await leo.query(api.comments.thread, { postId: published.id });
+    const t2 = await comments(leo, published.id);
     assert.equal(t2.find((c) => c.id === c2)!.reactions.total, 0);
     // The refusal is on the record too, with AuthBoundry's reason.
     assert.ok((await maya.query(api.agents.activityOf, { profileId: mayaId })).some((a) => a.type === "delegation.refused" && a.reason === "delegation_revoked"));
@@ -512,6 +514,119 @@ test("delegation: a digest summarises real activity; a task scheduled for later 
     const later = await maya.mutation(api.tasks.create, { kind: "publish", draft: { text: "later" }, runAt: Date.now() + 3_600_000 });
     await t.runtime.runServices();
     assert.equal((await maya.query(api.tasks.list)).find((x) => x.id === later)!.status, "scheduled");
+  }));
+
+// ------------------------------------------------------------------------------------ communities
+
+test("communities: people and agents join and post; the feed brings them home; moderation; visibility still holds", () =>
+  withApp(async (t) => {
+    const { me: maya } = await person(t, "maya");
+    const { me: leo } = await person(t, "leo");
+    const { me: ola } = await person(t, "ola");
+    const id = await maya.mutation(api.communities.create, { slug: "film-lab", name: "Film Lab", description: "Developing, scanning, printing.", topics: ["#Film", "darkroom"] });
+    await assert.rejects(leo.mutation(api.communities.create, { slug: "film-lab", name: "Again" }), { code: "CONFLICT" });
+
+    // Posting into a community needs membership.
+    await assert.rejects(leo.mutation(api.posts.create, { text: "hi", communityId: id }), { code: "FORBIDDEN" });
+    assert.deepEqual(await leo.mutation(api.communities.join, { slug: "film-lab" }), { role: "member" });
+    assert.deepEqual(await leo.mutation(api.communities.join, { slug: "film-lab" }), { role: "member" }, "joining twice changes nothing");
+    const bot = t.as(agentP("lab-bot"));
+    await bot.mutation(api.profiles.create, { username: "labbot", displayName: "Lab Bot" });
+    await bot.mutation(api.communities.join, { slug: "film-lab" });
+    const leoPost = await leo.mutation(api.posts.create, { text: "Stand development, 1 hour #film", communityId: id });
+    const botPost = await bot.mutation(api.posts.create, { text: "Chart: dilution vs. time", communityId: id });
+    const secret = await leo.mutation(api.posts.create, { text: "followers only", communityId: id, visibility: "followers" });
+
+    const info = (await ola.query(api.communities.get, { slug: "film-lab" }))!;
+    assert.deepEqual([info.members, info.agents, info.posts, info.myRole, info.topics], [3, 1, 3, "", ["film", "darkroom"]].map((v, i) => (i === 3 ? null : v)));
+    // A non-member sees the community's public posts; never a followers-only one of someone they don't follow.
+    assert.deepEqual((await ola.query(api.communities.feed, { slug: "film-lab" })).posts.map((p) => p.id).sort(), [leoPost, botPost].sort());
+    // Maya (owner) doesn't follow Leo or the bot, yet their community posts reach her home feed, once.
+    const home = (await maya.query(api.posts.feed, {})).posts;
+    assert.deepEqual(home.map((p) => p.id).sort(), [leoPost, botPost].sort());
+    assert.equal(home[0]!.community!.slug, "film-lab");
+    await maya.mutation(api.follows.create, { profileId: (await leo.query(api.profiles.me))!.id });
+    const again = (await maya.query(api.posts.feed, {})).posts.map((p) => p.id);
+    assert.equal(again.filter((x) => x === leoPost).length, 1, "followed and in a joined community: shown once");
+    assert.ok(again.includes(secret), "now a follower, Maya sees the followers-only post");
+
+    // Moderation: members can't, the owner (and moderators) can take a post out; it stays its author's.
+    await assert.rejects(leo.mutation(api.communities.removePost, { postId: botPost }), { code: "FORBIDDEN" });
+    await maya.mutation(api.communities.setRole, { slug: "film-lab", profileId: (await leo.query(api.profiles.me))!.id, role: "moderator" });
+    assert.deepEqual(await leo.mutation(api.communities.removePost, { postId: botPost }), { removed: true });
+    assert.ok(!(await ola.query(api.communities.feed, { slug: "film-lab" })).posts.some((p) => p.id === botPost));
+    assert.ok(await ola.query(api.posts.get, { id: botPost }), "the post itself remains");
+
+    await assert.rejects(maya.mutation(api.communities.leave, { slug: "film-lab" }), { code: "FAILED_PRECONDITION" });
+    assert.deepEqual(await bot.mutation(api.communities.leave, { slug: "film-lab" }), { role: null });
+    assert.deepEqual((await ola.query(api.discover.search, { text: "darkroom" })).communities.map((c) => c.slug), []);
+    assert.deepEqual((await ola.query(api.discover.search, { text: "scanning" })).communities.map((c) => c.slug), ["film-lab"]);
+
+    // Scout points people to communities about a post's topics.
+    const q = await ola.mutation(api.posts.create, { text: "First roll #film" });
+    await ola.mutation(api.comments.create, { postId: q, text: "@scout where do film people hang out?" });
+    const reply = await settle(() => comments(ola, q), (c) => c.some((x) => x.author?.username === "scout"));
+    assert.match(reply.find((x) => x.author?.username === "scout")!.text, /Community: c\/film-lab/);
+  }));
+
+// ------------------------------------------------------------------------------- paged conversations
+
+test("conversations page by top-level comment: every root exactly once, in order, with its replies", () =>
+  withApp(async (t) => {
+    const { me: maya } = await person(t, "maya");
+    const { me: leo } = await person(t, "leo");
+    const postId = await post(t, "maya", "Busy thread");
+    // Every root written at the same instant (only Date is frozen): page boundaries fall inside ties.
+    mock.timers.enable({ apis: ["Date"], now: Date.now() });
+    const roots: string[] = [];
+    try {
+      for (let i = 0; i < 23; i++) roots.push(await (i % 2 ? leo : maya).mutation(api.comments.create, { postId, text: `root ${i}` }));
+    } finally {
+      mock.timers.reset();
+    }
+    const r0 = roots[0]!;
+    const reply = await leo.mutation(api.comments.create, { postId, text: "reply", parentId: r0 });
+    await maya.mutation(api.comments.create, { postId, text: "reply to reply", parentId: reply });
+
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    let pages = 0;
+    do {
+      const page = await maya.query(api.comments.thread, { postId, limit: 5, ...(cursor ? { cursor } : {}) });
+      const pageRoots = page.comments.filter((c) => c.parentId === null);
+      assert.ok(pageRoots.length <= 5);
+      seen.push(...pageRoots.map((c) => c.id));
+      // Replies travel with their root.
+      if (pageRoots.some((c) => c.id === r0)) assert.deepEqual(page.comments.filter((c) => c.parentId !== null).map((c) => c.text), ["reply", "reply to reply"]);
+      assert.equal(page.total, 25);
+      cursor = page.nextCursor ?? undefined;
+      pages++;
+    } while (cursor && pages < 20);
+    assert.equal(seen.length, 23);
+    assert.deepEqual(new Set(seen), new Set(roots), "every root exactly once");
+    await assert.rejects(maya.query(api.comments.thread, { postId, cursor: "nonsense" }), { code: "INVALID_ARGUMENT" });
+  }));
+
+test("cancelling a scheduled post releases its images, unless another scheduled post still uses them", () =>
+  withApp(async (t) => {
+    const { me: maya } = await person(t, "maya");
+    const a = await photo(t, maya);
+    const b = await photo(t, maya);
+    const later = Date.now() + 3_600_000;
+    const first = await maya.mutation(api.tasks.create, { kind: "publish", draft: { text: "one", media: [a, b] }, runAt: later });
+    const second = await maya.mutation(api.tasks.create, { kind: "publish", draft: { text: "two", media: [b] }, runAt: later });
+    const files = async () => Object.fromEntries((await t.runtime.instance.handle("test").collection<{ id: string; deletedAt?: string }>("files").find({})).map((f) => [f.id, Boolean(f.deletedAt)]));
+
+    await maya.mutation(api.tasks.cancel, { id: first });
+    await t.runtime.runServices();
+    let state = await files();
+    assert.equal(state[a.fileId], true, "a: only the cancelled post used it");
+    assert.equal(state[b.fileId], false, "b: the other scheduled post still needs it");
+
+    await maya.mutation(api.tasks.cancel, { id: second });
+    await t.runtime.runServices();
+    state = await files();
+    assert.equal(state[b.fileId], true);
   }));
 
 // ------------------------------------------------------------------------------------- durability

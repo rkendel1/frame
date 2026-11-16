@@ -96,14 +96,14 @@ export function AgentGlyph({ size = 14 }: { size?: number }) {
 }
 
 // ── Rich text: @mentions and #topics become links. ──
-const TOKEN = /(@[a-z0-9._]{2,29}[a-z0-9_]|#[\p{L}\p{N}_]{2,40})/gu;
+const TOKEN = /(@[a-z0-9._]{2,29}[a-z0-9_]|#[\p{L}\p{N}_]{2,40}|\bc\/[a-z0-9-]{3,40})/gu;
 export function RichText({ text }: { text: string }) {
   const parts = text.split(TOKEN);
   return (
     <>
       {parts.map((part, i) =>
         i % 2 === 1 ? (
-          <Link key={i} className="token" to={part.startsWith("@") ? `/u/${part.slice(1)}` : `/t/${part.slice(1).toLowerCase()}`}>
+          <Link key={i} className="token" to={part.startsWith("@") ? `/u/${part.slice(1)}` : part.startsWith("c/") ? `/${part}` : `/t/${part.slice(1).toLowerCase()}`}>
             {part}
           </Link>
         ) : (

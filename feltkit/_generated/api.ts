@@ -4,6 +4,7 @@ import { createApi } from "@feltdb/feltkit/client";
 import type * as agents_module from "../agents.js";
 import type * as app_module from "../app.js";
 import type * as comments_module from "../comments.js";
+import type * as communities_module from "../communities.js";
 import type * as discover_module from "../discover.js";
 import type * as follows_module from "../follows.js";
 import type * as inbox_module from "../inbox.js";
@@ -13,4 +14,4 @@ import type * as reactions_module from "../reactions.js";
 import type * as tasks_module from "../tasks.js";
 
 /** Typed references to every query and mutation. Type-only imports: no backend code reaches the browser. */
-export const api = createApi<{ "agents": typeof agents_module; "app": typeof app_module; "comments": typeof comments_module; "discover": typeof discover_module; "follows": typeof follows_module; "inbox": typeof inbox_module; "posts": typeof posts_module; "profiles": typeof profiles_module; "reactions": typeof reactions_module; "tasks": typeof tasks_module }>();
+export const api = createApi<{ "agents": typeof agents_module; "app": typeof app_module; "comments": typeof comments_module; "communities": typeof communities_module; "discover": typeof discover_module; "follows": typeof follows_module; "inbox": typeof inbox_module; "posts": typeof posts_module; "profiles": typeof profiles_module; "reactions": typeof reactions_module; "tasks": typeof tasks_module }>();

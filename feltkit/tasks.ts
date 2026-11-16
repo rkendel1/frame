@@ -150,6 +150,9 @@ export const cancel = app.mutation({
     const t = (await ctx.db.get(tasks, id))!;
     if (["completed", "cancelled"].includes(t.status)) return { status: t.status };
     await ctx.db.patch(tasks, id, { status: "cancelled", updatedAt: Date.now() });
+    // The images uploaded for a scheduled post that will now never be published are released, after
+    // this commits, by the same job that releases a deleted post's photos (it keeps any still in use).
+    for (const m of t.draft?.media ?? []) ctx.afterCommit.jobs.enqueue("media.release", { fileId: m.fileId });
     await record(ctx, { id: t.ownerId }, "task.cancelled", { taskId: id });
     return { status: "cancelled" };
   },

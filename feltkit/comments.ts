@@ -65,16 +65,49 @@ export const remove = app.mutation({
   },
 });
 
-/** Every comment on a post the caller can see, oldest first, with parentId for threading. */
+/**
+ * A post's conversation, a page at a time: top-level comments oldest first (through the
+ * (postId, root, createdAt) index), each with its whole reply thread. `cursor` is opaque.
+ */
 export const thread = app.query({
   access: "frame.read",
-  args: { postId: s.string() },
-  returns: s.array(CommentView),
-  capability: { name: "comments.thread", description: "The conversation on a post: every comment and reply (parentId), with authors (people and agents) and reactions." },
-  handler: async (ctx, { postId }) => {
+  args: { postId: s.string(), cursor: s.optional(s.string({ maxLength: 80 })), limit: s.optional(s.integer({ minimum: 1, maximum: 50 })) },
+  returns: s.object({ comments: s.array(CommentView), nextCursor: s.nullable(s.string()), total: s.integer() }),
+  capability: { name: "comments.thread", description: "The conversation on a post, paged by top-level comment (oldest first), each with all its replies (parentId). Pass nextCursor back as cursor for more." },
+  handler: async (ctx, { postId, cursor, limit = 20 }) => {
     const me = await myProfile(ctx);
     await requireVisiblePost(ctx.db, postId, me);
-    const all = await ctx.db.find(comments, { postId }, { orderBy: [{ field: "createdAt", direction: "asc" }], limit: 500 });
-    return Promise.all(all.map((c) => commentView(ctx.db, c, me?.id ?? null)));
+    // Cursor: "<createdAt>:<id>" of the last root shown. Equal timestamps are ordered by id.
+    const [at, lastId] = cursor ? [Number(cursor.split(":")[0]), cursor.split(":").slice(1).join(":")] : [undefined, ""];
+    if (cursor && !Number.isFinite(at)) fail("INVALID_ARGUMENT", "Bad cursor.");
+    const where = [{ field: "postId", eq: postId }, { field: "root", eq: true }, ...(at !== undefined ? [{ field: "createdAt", gte: at }] : [])];
+    const byOrder = (a: { createdAt: number; id: string }, b: { createdAt: number; id: string }) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    const roots: Array<Awaited<ReturnType<typeof ctx.db.get<typeof comments>>> & {}> = [];
+    let pageCursor: string | undefined;
+    // Read until there are more than `limit` roots and every root sharing the boundary timestamp has
+    // been read (the index orders by time only; ties are ordered by id here), so nothing is skipped.
+    for (let round = 0; round < 20; round++) {
+      const { records, nextCursor, exhausted } = await ctx.db.query(comments, { where, orderBy: [{ field: "createdAt", direction: "asc" }], limit: limit + 1, ...(pageCursor ? { cursor: pageCursor } : {}) });
+      for (const c of records) if (at === undefined || c.createdAt > at || c.id > lastId) roots.push(c);
+      if (exhausted || !nextCursor || records.length === 0) break;
+      roots.sort(byOrder);
+      const boundary = roots[limit - 1]?.createdAt;
+      if (roots.length > limit && records[records.length - 1]!.createdAt > boundary!) break;
+      pageCursor = nextCursor;
+    }
+    roots.sort(byOrder);
+    const shown = roots.slice(0, limit);
+    // Each root's replies, breadth first through the parentId index (bounded).
+    const out = [...shown];
+    for (let i = 0; i < out.length && out.length < 500; i++) {
+      const replies = await ctx.db.find(comments, { parentId: out[i]!.id }, { orderBy: [{ field: "createdAt", direction: "asc" }], limit: 200 });
+      out.push(...replies);
+    }
+    const last = shown[shown.length - 1];
+    return {
+      comments: await Promise.all(out.map((c) => commentView(ctx.db, c, me?.id ?? null))),
+      nextCursor: roots.length > limit && last ? `${last.createdAt}:${last.id}` : null,
+      total: await ctx.db.count(comments, { postId }),
+    };
   },
 });

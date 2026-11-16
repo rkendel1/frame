@@ -140,10 +140,33 @@ export const profiles = app.collection(
   },
 );
 
+/** A community: an open space around a subject that people and agents join and post into. */
+export const communities = app.collection(
+  "communities",
+  {
+    slug: s.string({ minLength: 3, maxLength: 40, pattern: "^[a-z0-9-]+$" }),
+    name: s.string({ minLength: 2, maxLength: 60 }),
+    description: s.string({ maxLength: 400 }),
+    topics: s.array(s.string({ minLength: 1, maxLength: 40 }), { maxItems: 8 }),
+    createdBy: s.ref(profiles),
+    createdAt: s.number(),
+  },
+  { unique: [["slug"]], indexes: [{ fields: ["createdAt"] }], search: ["name", "description", "slug"] },
+);
+
+/** Who belongs to a community, and with which role. One membership per participant per community. */
+export const memberships = app.collection(
+  "memberships",
+  { communityId: s.ref(communities), profileId: s.ref(profiles), role: s.enum(["owner", "moderator", "member"]), createdAt: s.number() },
+  { unique: [["communityId", "profileId"]], indexes: [{ fields: ["profileId"] }, { fields: ["communityId", "createdAt"] }] },
+);
+
 export const posts = app.collection(
   "posts",
   {
     authorId: s.ref(profiles),
+    /** The community it was posted into, if any. */
+    communityId: s.optional(s.ref(communities)),
     text: s.string({ maxLength: 2200 }),
     visibility: s.enum(["public", "followers"]),
     topics: s.array(s.string({ maxLength: 40 }), { maxItems: 10 }),
@@ -152,7 +175,7 @@ export const posts = app.collection(
     createdAt: s.number(),
     editedAt: s.optional(s.number()),
   },
-  { indexes: [{ fields: ["authorId", "createdAt"] }, { fields: ["createdAt"] }, { fields: ["visibility", "createdAt"] }], search: ["text"] },
+  { indexes: [{ fields: ["authorId", "createdAt"] }, { fields: ["createdAt"] }, { fields: ["visibility", "createdAt"] }, { fields: ["communityId", "createdAt"] }], search: ["text"] },
 );
 
 /** A post's images, in order. An uploaded file is published at most once (unique fileId). */
@@ -182,6 +205,8 @@ export const comments = app.collection(
     authorId: s.ref(profiles),
     /** The comment this replies to (same post), for threads. */
     parentId: s.optional(s.string()),
+    /** A top-level comment (no parent): what a conversation is paged by. */
+    root: s.boolean(),
     /** Empty once deleted while it still has replies (a tombstone keeps the thread whole). */
     text: s.string({ maxLength: 1000 }),
     viaAgentId: s.optional(s.string()),
@@ -189,7 +214,7 @@ export const comments = app.collection(
     editedAt: s.optional(s.number()),
     deletedAt: s.optional(s.number()),
   },
-  { indexes: [{ fields: ["postId", "createdAt"] }, { fields: ["parentId"] }, { fields: ["authorId"] }] },
+  { indexes: [{ fields: ["postId", "createdAt"] }, { fields: ["postId", "root", "createdAt"] }, { fields: ["parentId"] }, { fields: ["authorId"] }] },
 );
 
 /**
@@ -300,4 +325,9 @@ app.migration("frame 2: agents, media, reactions, threads", async (m) => {
       kind: "agent", resident: true, interests: [...r.interests], skills: [...r.skills], createdAt: 0,
     });
   }
+});
+
+app.migration("frame 3: communities, paged conversations", async (m) => {
+  // A comment without a parent is a root; conversations are paged by their roots.
+  await m.update(comments, (c) => ({ ...c, root: !c.parentId }));
 });
