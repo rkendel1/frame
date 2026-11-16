@@ -28,18 +28,17 @@ export const NOTIFICATION_TYPES = [
 export const REACTIONS = ["like", "celebrate", "insightful", "funny", "wow", "support"] as const;
 
 /**
- * What a person can delegate to Concierge, as AuthBoundry capabilities. A grant is the person's, made
- * through Frame (`ctx.authority.grants`), and AuthBoundry decides each use at the moment it happens.
+ * What a person can delegate, as AuthBoundry capabilities. A grant names the capability AND the agent
+ * it is for (`ctx.authority.grants.grant({ capabilities, agent })`): granting Concierge "frame.publish"
+ * lets Concierge, and no other agent, publish for that person. AuthBoundry decides each use when it
+ * happens, as the agent itself (proven by its own credential).
  */
 export const DELEGABLE = {
-  "concierge.publish": "Publish a post you prepared, as you, when you scheduled it.",
-  "concierge.react": "React to comments on your posts, as you, while you're away.",
-  "concierge.digest": "Read the activity on your posts and send you a digest.",
+  "frame.publish": "Publish a post you prepared, as you, when you scheduled it.",
+  "frame.react": "React to comments on your posts, as you, while you're away.",
+  "frame.digest": "Read the activity on your posts and send you a digest.",
 } as const;
 export type DelegableCapability = keyof typeof DELEGABLE;
-
-/** AuthBoundry's principal for a Frame account (one place, used for grants and for decisions). */
-export const authorityPrincipal = (userId: string) => `user:${userId}`;
 
 /** Frame's resident agents: their principals (app.agent) and their profiles (created by a migration). */
 export const RESIDENTS = {
@@ -86,19 +85,27 @@ export const app = feltkit({
       { id: "grace", name: "Grace Hopper", roles: ["member"] },
     ],
   },
-  // A private AuthBoundry, run by FeltKit beside Frame's state. People grant Concierge capabilities;
-  // every on-behalf action is decided there when it happens, so a revoked grant stops the next one.
+  // A private AuthBoundry, run by FeltKit beside Frame's state. Every app.agent is registered there as
+  // its own agent (with its own credential); people grant capabilities to a specific agent, and every
+  // on-behalf action is decided there when it happens, so a revoked grant stops the next one.
   authority: {
     local: true,
     application: "frame",
     capabilities: Object.keys(DELEGABLE),
-    principal: authorityPrincipal,
     checkCredential: "credential-ref:frame-authority-check",
     executor: { principal: "agent:frame-concierge", type: "agent" },
   },
   services: {
     // Photos up to 4 MB (the browser resizes to 1440 px JPEG before upload; typical 200–600 KB).
-    files: { maxBytes: 4 * 1024 * 1024 },
+    // Image sizes FeltKit derives once per photo, on first request, authorized as the original.
+    files: {
+      maxBytes: 4 * 1024 * 1024,
+      variants: {
+        grid: { width: 480, height: 480, fit: "cover" },
+        feed: { width: 1080 },
+        avatar: { width: 160, height: 160, fit: "cover" },
+      },
+    },
     notifications: { types: [...NOTIFICATION_TYPES] },
     jobs: {
       handlers: {
@@ -175,7 +182,7 @@ export const posts = app.collection(
     createdAt: s.number(),
     editedAt: s.optional(s.number()),
   },
-  { indexes: [{ fields: ["authorId", "createdAt"] }, { fields: ["createdAt"] }, { fields: ["visibility", "createdAt"] }, { fields: ["communityId", "createdAt"] }], search: ["text"] },
+  { indexes: [{ fields: ["authorId", "createdAt"], directions: ["asc", "desc"] }, { fields: ["createdAt"] }, { fields: ["visibility", "createdAt"] }, { fields: ["communityId", "createdAt"], directions: ["asc", "desc"] }], search: ["text"] },
 );
 
 /** A post's images, in order. An uploaded file is published at most once (unique fileId). */
@@ -330,4 +337,8 @@ app.migration("frame 2: agents, media, reactions, threads", async (m) => {
 app.migration("frame 3: communities, paged conversations", async (m) => {
   // A comment without a parent is a root; conversations are paged by their roots.
   await m.update(comments, (c) => ({ ...c, root: !c.parentId }));
+});
+
+app.migration("frame 4: delegation capabilities name the action, grants name the agent", async (m) => {
+  await m.update(tasks, (t) => ({ ...t, capability: String(t.capability).replace(/^concierge\./, "frame.") }));
 });

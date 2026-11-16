@@ -123,10 +123,18 @@ test("accounts, profiles, multi-photo upload over HTTP, feed composition", async
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("content-type"), "image/jpeg");
   assert.match(res.headers.get("content-security-policy") ?? "", /sandbox/);
-  // FRAME-GAP-01 evidence: photo links cannot be cached by the browser, and each issue is a new URL.
-  assert.equal(res.headers.get("cache-control"), "private, no-store");
-  assert.notEqual((await bob.query(api.posts.mediaLink, { fileId: card.media[0].fileId })).url, link.url);
+  // FRAME-GAP-01, closed: a cacheable link. The browser may keep the bytes; asking again gives the same URL.
+  assert.match(res.headers.get("cache-control") ?? "", /^private, max-age=\d+, immutable$/);
+  const etag = res.headers.get("etag");
+  assert.ok(etag);
+  assert.equal((await bob.query(api.posts.mediaLink, { fileId: card.media[0].fileId })).url, link.url);
+  assert.equal((await fetch(BASE + link.url, { headers: { "if-none-match": etag } })).status, 304);
   assert.deepEqual([...new Uint8Array(await res.arrayBuffer()).slice(0, 3)], [0xff, 0xd8, 0xff]);
+  // FRAME-GAP-06, closed: a smaller size, derived by FeltKit (served once ready; the original until then).
+  const grid = await bob.query(api.posts.mediaLink, { fileId: card.media[0].fileId, variant: "grid" });
+  let variant;
+  for (let i = 0; i < 20 && variant !== "grid"; i++) variant = (await fetch(BASE + grid.url)).headers.get("x-feltkit-variant");
+  assert.equal(variant, "grid");
   assert.equal((await fetch(`${BASE}/api/files/fkf_${"x".repeat(30)}`)).status, 404);
 
   assert.equal((await bob.query(api.posts.feed, {})).posts.length, 0, "bob follows nobody yet");
@@ -155,12 +163,12 @@ test("unauthorized operations are refused over HTTP", async () => {
 });
 
 test("delegation in production: AuthBoundry allows, then refuses after revocation", async () => {
-  await alice.mutation(api.tasks.grant, { capability: "concierge.react" });
+  await alice.mutation(api.tasks.grant, { capability: "frame.react" });
   await alice.mutation(api.tasks.create, { kind: "react" });
   const c1 = await bob.mutation(api.comments.create, { postId: alicePost, text: "The second frame!" });
   const who = await until(() => bob.query(api.reactions.list, { postId: alicePost, commentId: c1 }), (l) => l.length === 1);
   assert.deepEqual([who[0].profile.username, who[0].via.username, who[0].kind], ["alice", "concierge", "support"]);
-  await alice.mutation(api.tasks.revoke, { capability: "concierge.react" });
+  await alice.mutation(api.tasks.revoke, { capability: "frame.react" });
   const c2 = await bob.mutation(api.comments.create, { postId: alicePost, text: "And again" });
   const tasks = await until(() => alice.query(api.tasks.list), (l) => l[0].status === "needs_permission");
   assert.match(tasks[0].error, /revoked/);
@@ -195,7 +203,7 @@ test("an external agent joins over MCP: sees what it may call, participates as i
   assert.ok(!tools.some((t) => t.startsWith("feltkit_agent")), "no FeltKit agent tools without their permission");
   assert.ok(!tools.some((t) => /^(delegation|tasks)_(grant|revoke|create)/.test(t)), "an agent is not shown a person's delegation operations");
   // ...and an unlisted one called directly is refused the same way.
-  await assert.rejects(tool("delegation_grant", { capability: "concierge.publish" }), /FORBIDDEN|not found|Unknown/i);
+  await assert.rejects(tool("delegation_grant", { capability: "frame.publish" }), /FORBIDDEN|not found|Unknown/i);
 
   await tool("profiles_create", { username: "curator.bot", displayName: "Curator", skills: ["curation"] });
   const found = await tool("discover_search", { text: "alice" });
@@ -330,5 +338,5 @@ test("everything survives a server restart on the same state", async () => {
   assert.equal((await fetch(BASE + link.url)).status, 200, "the photo's bytes survived too");
   assert.ok((await alice.query(api.inbox.list, {})).groups.length > 0);
   // The delegation state lives in AuthBoundry's own store: still revoked after the restart.
-  assert.equal((await alice.mutation(api.tasks.delegationStatus)).find((g) => g.capability === "concierge.react").granted, false);
+  assert.equal((await alice.mutation(api.tasks.delegationStatus)).find((g) => g.capability === "frame.react").granted, false);
 });

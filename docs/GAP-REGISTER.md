@@ -9,6 +9,12 @@ session can reach only the Frame repository, and none of these packages can be p
 Severity: **High**, blocks a core feature on a supported path. **Medium**, Frame works with a
 workaround or a known cost. **Low**, friction.
 
+## Status after the platform work on branch `claude/kind-pascal-56i8k8` (unreleased)
+
+On this branch Frame uses the implementations described in [PLATFORM-NEXT.md](PLATFORM-NEXT.md):
+FRAME-GAP-01, 05, 06, 08, 11 and 12 are **closed upstream (unreleased)** and their workarounds are removed
+here. 02, 03, 07, 13 and 14 remain open. The tables below record the state on the published packages.
+
 ## Status of Frame 1's gaps after the upgrade
 
 | ID | Gap | Owner | Status in 0.3.30 / 0.18.0 | Frame now |

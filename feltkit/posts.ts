@@ -85,9 +85,9 @@ export const get = app.query({
 });
 
 /**
- * Home: the caller's and followed participants' posts (people and agents), newest first. FeltDB has
- * no set-membership query (FRAME-GAP-05), so each author's newest page is read through the
- * (authorId, createdAt) index and merged.
+ * Home: the caller's posts, followed people's and agents' posts, and posts in joined communities,
+ * newest first. Each source is one set query (FeltDB `in`, at most 256 values a query), served as an
+ * index merge; `cursor` is the last createdAt seen.
  */
 export const feed = app.query({
   access: "frame.read",
@@ -99,9 +99,10 @@ export const feed = app.query({
     if (!me) return { posts: [], nextCursor: null };
     const authors = [me.id, ...(await ctx.db.find(follows, { followerId: me.id })).map((f) => f.followeeId)];
     const joined = (await ctx.db.find(memberships, { profileId: me.id })).map((m) => m.communityId);
+    const chunks = <T,>(list: T[]) => Array.from({ length: Math.ceil(list.length / 256) }, (_, i) => list.slice(i * 256, i * 256 + 256));
     const pages = await Promise.all([
-      ...authors.map((authorId) => page(ctx.db, me, { authorId, before: cursor, limit })),
-      ...joined.map((communityId) => page(ctx.db, me, { communityId, before: cursor, limit })),
+      ...chunks(authors).map((authorIds) => page(ctx.db, me, { authorIds, before: cursor, limit })),
+      ...chunks(joined).map((communityIds) => page(ctx.db, me, { communityIds, before: cursor, limit })),
     ]);
     // A post can arrive by both routes (a followed author posting in a joined community): once.
     const seen = new Set<string>();
@@ -131,7 +132,7 @@ export const byAuthor = app.query({
   returns: GridPage,
   capability: { name: "posts.byauthor", description: "One person's or agent's posts that the caller may see, newest first." },
   handler: async (ctx, { profileId, cursor, limit = 24 }) => {
-    const { items, nextCursor } = await page(ctx.db, await myProfile(ctx), { authorId: profileId, before: cursor, limit });
+    const { items, nextCursor } = await page(ctx.db, await myProfile(ctx), { authorIds: [profileId], before: cursor, limit });
     return { posts: await gridItems(ctx.db, items), nextCursor };
   },
 });
@@ -172,17 +173,21 @@ export const search = app.query({
 
 /**
  * A download link for an image, only if the caller may see what it belongs to: a post they may see,
- * or a profile picture. Unpublished uploads and hidden posts' images are never linked.
+ * or a profile picture. Unpublished uploads and hidden posts' images are never linked. The link is
+ * FeltKit's cacheable kind: the same URL for this caller and photo within a window, which the browser
+ * may cache (`private, immutable`), so a live feed re-running does not download photos again; and it
+ * can ask for a smaller size FeltKit derives once (`grid`, `feed`, `avatar`).
  */
 export const mediaLink = app.query({
   access: "frame.read",
-  args: { fileId: s.string() },
+  args: { fileId: s.string(), variant: s.optional(s.enum(["grid", "feed", "avatar"])) },
   returns: s.object({ url: s.string(), expiresAt: s.string() }),
-  handler: async (ctx, { fileId }) => {
+  handler: async (ctx, { fileId, variant }) => {
     const [m] = await ctx.db.find(media, { fileId });
     const ok = m ? Boolean(await visiblePost(ctx.db, m.postId, await myProfile(ctx))) : (await ctx.db.count(profiles, { avatarFileId: fileId })) > 0;
     if (!ok) fail("NOT_FOUND", "No such image.");
-    return ctx.services.files.link(fileId, { disposition: "inline", expiresInSeconds: 3600 });
+    const link = await ctx.services.files.link(fileId, { disposition: "inline", expiresInSeconds: 3600, cache: true, ...(variant ? { variant } : {}) });
+    return { url: link.url, expiresAt: link.expiresAt };
   },
 });
 

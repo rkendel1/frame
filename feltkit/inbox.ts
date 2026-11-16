@@ -4,8 +4,9 @@
  * snippet, the actor and the deep link are resolved here, at read time, under the reader's current
  * visibility, so deleting a post or hiding it from followers also hides it from old notifications.
  *
- * Pagination and grouping are done here because the service's list has no limit or cursor
- * (FRAME-GAP-08): it reads the caller's notifications and pages them in memory.
+ * Paging is AppPort Services' own (`notifications.page`: newest first, an opaque cursor, a bounded
+ * read through the per-recipient index). Frame groups within a page and filters "mentions" and
+ * "agents" over the service's pages.
  */
 import { s, type QueryCtx } from "@feltdb/feltkit";
 import { NOTIFICATION_TYPES, app, comments, notificationSettings, posts, sponsorships, tasks } from "./app.js";
@@ -74,26 +75,29 @@ async function resolve(ctx: QueryCtx, n: { id: string; type: string; title: stri
   };
 }
 
+const MENTIONS = new Set(["mentioned", "comment.replied"]);
+const fromAgent = (n: { type: string; data?: Record<string, unknown> }) => n.data?.actorKind === "agent" || Boolean(n.data?.viaAgentId) || n.type.startsWith("agent.");
+
 export const list = app.query({
   access: "notifications.read",
   args: { filter: s.optional(Filter), cursor: s.optional(s.string()), limit: s.optional(s.integer({ minimum: 1, maximum: 50 })) },
-  returns: s.object({ groups: s.array(Group), nextCursor: s.nullable(s.string()), unread: s.integer() }),
-  capability: { name: "notifications.inbox", description: "The caller's notifications, newest first, grouped (several reactions to one post become one entry), with deep links. filter: all, unread, mentions, agents. Pass nextCursor back as cursor." },
+  returns: s.object({ groups: s.array(Group), nextCursor: s.nullable(s.string()), unread: s.integer(), unreadComplete: s.boolean() }),
+  capability: { name: "notifications.inbox", description: "The caller's notifications, newest first, grouped (several reactions to one post become one entry), with deep links. filter: all, unread, mentions, agents. Pass nextCursor back as cursor, with the same filter and limit." },
   handler: async (ctx, { filter = "all", cursor, limit = 20 }) => {
     const me = await myProfile(ctx);
-    const all = (await ctx.services.notifications.list({})).sort((a, b) => (a.createdAt === b.createdAt ? (a.id < b.id ? 1 : -1) : a.createdAt < b.createdAt ? 1 : -1));
-    const unread = all.filter((n) => !n.readAt).length;
-    const key = (n: { createdAt: string; id: string }) => `${n.createdAt}|${n.id}`;
-    const wanted = all.filter((n) => {
-      if (cursor && key(n) >= cursor) return false;
-      if (filter === "unread") return !n.readAt;
-      if (filter === "mentions") return n.type === "mentioned" || n.type === "comment.replied";
-      if (filter === "agents") return n.data?.actorKind === "agent" || Boolean(n.data?.viaAgentId) || n.type.startsWith("agent.");
-      return true;
-    });
-    const pageItems = wanted.slice(0, limit);
+    const service = ctx.services.notifications;
+    // The service's cursor is bound to its filters and limit: every page of one walk asks the same.
+    const keep = filter === "mentions" ? (n: { type: string }) => MENTIONS.has(n.type) : filter === "agents" ? fromAgent : () => true;
+    const items: Awaited<ReturnType<typeof service.page>>["items"] = [];
+    let next: string | undefined = cursor;
+    for (let round = 0; round < 10; round++) {
+      const page = await service.page({ limit, ...(filter === "unread" ? { unread: true } : {}), ...(next ? { cursor: next } : {}) });
+      items.push(...page.items.filter(keep));
+      next = page.nextCursor;
+      if (!next || items.length >= limit) break;
+    }
     const groups: Array<Awaited<ReturnType<typeof resolve>> & { ids: string[]; actors: NonNullable<Awaited<ReturnType<typeof resolve>>["actor"]>[]; read: boolean }> = [];
-    for (const n of pageItems) {
+    for (const n of items) {
       const r = await resolve(ctx, n, me);
       const last = groups[groups.length - 1];
       const same = last && GROUPABLE.has(n.type) && last.n.type === n.type && last.link.postId === r.link.postId && last.link.commentId === r.link.commentId && !r.unavailable && !last.unavailable;
@@ -103,9 +107,11 @@ export const list = app.query({
         last.read = last.read && Boolean(n.readAt);
       } else groups.push({ ...r, ids: [n.id], actors: r.actor ? [r.actor] : [], read: Boolean(n.readAt) });
     }
+    const unread = await service.unreadCount({ max: 99 });
     return {
-      unread,
-      nextCursor: wanted.length > limit ? key(pageItems[pageItems.length - 1]!) : null,
+      unread: unread.count,
+      unreadComplete: unread.complete,
+      nextCursor: next ?? null,
       groups: groups.map((g) => ({
         ids: g.ids, type: g.n.type, title: g.n.title, read: g.read, createdAt: g.n.createdAt,
         actors: g.actors.slice(0, 3), count: g.actors.length, via: g.via, fromAgent: g.fromAgent, reaction: g.reaction,
@@ -115,10 +121,11 @@ export const list = app.query({
   },
 });
 
+/** Unread notifications, counted up to 99 ("99+" when `complete` is false). */
 export const unreadCount = app.query({
   access: "notifications.read",
-  returns: s.integer(),
-  handler: async (ctx) => (await ctx.services.notifications.list({ unread: true })).length,
+  returns: s.object({ count: s.integer(), complete: s.boolean() }),
+  handler: async (ctx) => ctx.services.notifications.unreadCount({ max: 99 }),
 });
 
 export const markRead = app.mutation({
@@ -138,9 +145,14 @@ export const markAllRead = app.mutation({
   returns: s.integer(),
   capability: { name: "notifications.markallread", description: "Mark all of the caller's notifications read." },
   handler: async (ctx) => {
-    const unread = await ctx.services.notifications.list({ unread: true });
-    for (const n of unread) await ctx.services.notifications.markRead(n.id);
-    return unread.length;
+    let marked = 0;
+    // The service marks at most 1,000 a call and says when it is done.
+    for (let round = 0; round < 20; round++) {
+      const r = await (ctx.services.notifications as import("@feltdb/feltkit").NotificationsWriter).markAllRead({});
+      marked += r.marked;
+      if (r.complete) break;
+    }
+    return marked;
   },
 });
 

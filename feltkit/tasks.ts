@@ -1,19 +1,21 @@
 /**
- * Delegation. A person grants Concierge capabilities (AuthBoundry grants, through FeltKit's
- * `ctx.authority.grants`), assigns it work (a `tasks` record), and Concierge does that work later, as
+ * Delegation. A person grants Concierge, by name, capabilities (AuthBoundry grants to that agent, through
+ * FeltKit's `ctx.authority.grants`), assigns it work (a `tasks` record), and Concierge does that work later, as
  * itself, on the person's behalf. Every time it is about to act, it asks AuthBoundry
  * (`ctx.authority.decide`, on behalf of that person): a revoked or expired grant stops the very next
  * action, and the task records why and asks the person. Frame never stores a grant: AuthBoundry is the
  * authority, and the `decisionId` / `delegationId` on each task and activity record are its evidence.
  */
 import { fail, s } from "@feltdb/feltkit";
-import { DELEGABLE, RESIDENTS, app, authorityPrincipal, comments, posts, profiles, reactions, follows, tasks, type DelegableCapability } from "./app.js";
+import { DELEGABLE, RESIDENTS, app, comments, posts, profiles, reactions, follows, tasks, type DelegableCapability } from "./app.js";
 import { Author, PostCard, authorById, cards, myProfile, notify, ownImage, record, requirePerson } from "./_frame.js";
 import { publish, react } from "./_social.js";
 
-const CAPABILITY = { publish: "concierge.publish", react: "concierge.react", digest: "concierge.digest" } as const satisfies Record<string, DelegableCapability>;
+const CAPABILITY = { publish: "frame.publish", react: "frame.react", digest: "frame.digest" } as const satisfies Record<string, DelegableCapability>;
 const ownerOwns = { collection: tasks, id: "id", field: "ownerId", via: { collection: profiles, field: "userId" } } as const;
 const Cap = s.enum(Object.keys(DELEGABLE) as [DelegableCapability, ...DelegableCapability[]]);
+/** The agent delegated work is granted to: Concierge's own AuthBoundry identity, never the application's. */
+const CONCIERGE = RESIDENTS.concierge.principal;
 
 // ---------------------------------------------------------------------------------- delegation
 
@@ -29,7 +31,7 @@ export const delegationStatus = app.mutation({
   capability: { name: "delegation.status", description: "What the caller has allowed Concierge to do on their behalf, as AuthBoundry holds it now." },
   handler: async (ctx) => {
     await requirePerson(ctx);
-    const grants = (await ctx.authority.grants.list()).filter((g) => g.status === "active" && (g.expiresAt === null || g.expiresAt > Date.now()));
+    const grants = (await ctx.authority.grants.list()).filter((g) => g.agent === CONCIERGE && g.status === "active" && (g.expiresAt === null || g.expiresAt > Date.now()));
     return (Object.keys(DELEGABLE) as DelegableCapability[]).map((capability) => {
       const g = grants.find((x) => x.capabilities.includes(capability));
       return { capability, description: DELEGABLE[capability], granted: Boolean(g), grantId: g?.id ?? null, expiresAt: g?.expiresAt ?? null };
@@ -44,7 +46,7 @@ export const grant = app.mutation({
   capability: { name: "delegation.grant", description: "Allow Concierge one capability on the caller's behalf (optionally for a limited time). Person only." },
   handler: async (ctx, { capability, expiresInHours }) => {
     const me = await requirePerson(ctx);
-    const g = await ctx.authority.grants.grant({ capabilities: [capability], ...(expiresInHours ? { expiresAt: Date.now() + expiresInHours * 3_600_000 } : {}) });
+    const g = await ctx.authority.grants.grant({ capabilities: [capability], agent: CONCIERGE, ...(expiresInHours ? { expiresAt: Date.now() + expiresInHours * 3_600_000 } : {}) });
     await record(ctx, me, "delegation.granted", { capability, delegationId: g.id });
     return { grantId: g.id };
   },
@@ -57,12 +59,12 @@ export const revoke = app.mutation({
   capability: { name: "delegation.revoke", description: "Withdraw a capability from Concierge. Its next attempt to use it is refused by AuthBoundry." },
   handler: async (ctx, { capability }) => {
     const me = await requirePerson(ctx);
-    const grants = (await ctx.authority.grants.list()).filter((g) => g.status === "active" && g.capabilities.includes(capability));
+    const grants = (await ctx.authority.grants.list()).filter((g) => g.agent === CONCIERGE && g.status === "active" && g.capabilities.includes(capability));
     for (const g of grants) {
       await ctx.authority.grants.revoke(g.id);
       // A grant that covered other capabilities is re-made without this one.
       const rest = g.capabilities.filter((c) => c !== capability);
-      if (rest.length) await ctx.authority.grants.grant({ capabilities: rest, ...(g.expiresAt ? { expiresAt: g.expiresAt } : {}) });
+      if (rest.length) await ctx.authority.grants.grant({ capabilities: rest, agent: CONCIERGE, ...(g.expiresAt ? { expiresAt: g.expiresAt } : {}) });
     }
     await record(ctx, me, "delegation.revoked", { capability });
     return { revoked: grants.length };
@@ -223,8 +225,9 @@ export const concierge = app.agent("concierge", {
       target = { post, comment };
     }
 
-    // The authority: AuthBoundry, asked now, on the owner's behalf. No grant, no action.
-    const decision = await ctx.authority.decide({ capability: task.capability, onBehalfOf: authorityPrincipal(owner.userId) });
+    // The authority: AuthBoundry, asked now, on the owner's behalf, by Concierge itself (an app.agent
+    // decides as its own agent, proven by its credential). No grant to Concierge, no action.
+    const decision = await ctx.authority.decide({ capability: task.capability, onBehalfOf: owner.userId });
     const evidence = { decisionId: decision.decisionId ?? undefined, delegationId: decision.delegationId ?? undefined };
     const now = Date.now();
     if (!decision.allowed) {

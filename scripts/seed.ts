@@ -226,8 +226,8 @@ async function main() {
   }
 
   // The visitor lets Concierge thank commenters, and gets a digest.
-  await demo.mutation(api.tasks.grant, { capability: "concierge.react" });
-  await demo.mutation(api.tasks.grant, { capability: "concierge.digest" });
+  await demo.mutation(api.tasks.grant, { capability: "frame.react" });
+  await demo.mutation(api.tasks.grant, { capability: "frame.digest" });
   await demo.mutation(api.tasks.create, { kind: "react" });
   const link = await demo.mutation(api.posts.uploadLink);
   const file = await demo.uploadFile(link, await photo("1500530855697-b586d89ba3ee", 1080, 720), { name: "photo.jpg", contentType: "image/jpeg" });

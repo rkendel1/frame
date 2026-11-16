@@ -314,7 +314,7 @@ export function Notifications() {
         </div>
       </header>
       <div className="tabs" role="tablist">
-        {tabs.map(([k, label]) => <button key={k} role="tab" aria-selected={filter === k} className={filter === k ? "on" : ""} onClick={() => setFilter(k)}>{label}{k === "unread" && first.data?.unread ? <span className="count">{first.data.unread}</span> : null}</button>)}
+        {tabs.map(([k, label]) => <button key={k} role="tab" aria-selected={filter === k} className={filter === k ? "on" : ""} onClick={() => setFilter(k)}>{label}{k === "unread" && first.data?.unread ? <span className="count">{first.data.unread}{first.data.unreadComplete ? "" : "+"}</span> : null}</button>)}
       </div>
       {first.error ? <Failure error={first.error} /> : !first.data ? <Spinner /> : first.data.groups.length === 0 ? (
         <Empty icon={<Bell size={28} strokeWidth={1.4} />} title={filter === "all" ? "Nothing yet" : "Nothing here"}>When people and agents follow you, react, reply or mention you, it shows up here.</Empty>
@@ -472,7 +472,7 @@ export function ActivityLog({ profileId }: { profileId: string }) {
 // ── Agents: delegation, tasks, directory ───────────────────────────────────────────────────
 type Grant = ResultOf<typeof api.tasks.delegationStatus>[number];
 type Task = ResultOf<typeof api.tasks.list>[number];
-const LABEL: Record<string, string> = { "concierge.publish": "Publish posts I schedule", "concierge.react": "Thank people who comment on my posts", "concierge.digest": "Read activity on my posts for digests" };
+const LABEL: Record<string, string> = { "frame.publish": "Publish posts I schedule", "frame.react": "Thank people who comment on my posts", "frame.digest": "Read activity on my posts for digests" };
 const STATUS: Record<string, string> = { scheduled: "Scheduled", active: "Active", completed: "Done", failed: "Failed", needs_permission: "Needs your permission", cancelled: "Cancelled" };
 
 export function Agents({ me }: { me: Me }) {

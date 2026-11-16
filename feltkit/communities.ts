@@ -130,7 +130,7 @@ export const feed = app.query({
   capability: { name: "communities.feed", description: "A community's posts that the caller may see, newest first." },
   handler: async (ctx, { slug, cursor, limit = 24 }) => {
     const c = (await bySlug(ctx.db, slug)) ?? fail("NOT_FOUND", "No such community.");
-    const { items, nextCursor } = await page(ctx.db, await myProfile(ctx), { communityId: c.id, before: cursor, limit });
+    const { items, nextCursor } = await page(ctx.db, await myProfile(ctx), { communityIds: [c.id], before: cursor, limit });
     return { posts: await gridItems(ctx.db, items), nextCursor };
   },
 });
