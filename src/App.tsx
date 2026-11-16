@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { SignIn, useMutation, useQueryState, useSession } from "@feltdb/feltkit/react";
-import { Bell, Compass, House, SquarePlus } from "lucide-react";
+import { Bell, Compass, House, SquarePlus, Users } from "lucide-react";
 import type { ResultOf } from "@feltdb/feltkit/client";
 import { api } from "../feltkit/_generated/api";
 import { AgentGlyph, Avatar, Link, usePath } from "./lib";
-import { Agents, Create, Discover, Home, Notifications, PostView, Profile, Settings, TopicPage } from "./pages";
+import { Agents, Communities, CommunityPage, Create, Discover, Home, Notifications, PostView, Profile, Settings, TopicPage } from "./pages";
 
 export function App() {
   const { session } = useSession();
@@ -97,11 +97,12 @@ function Shell({ me }: { me: Me }) {
   const path = usePath();
   const unread = useQueryState(api.inbox.unreadCount);
   const badge = (unread.data ?? 0) > 0 && !path.startsWith("/notifications");
-  const nav: Array<{ to: string; label: string; icon: ReactNode; mobile?: boolean }> = [
+  const nav: Array<{ to: string; label: string; icon: ReactNode; desktop?: boolean }> = [
     { to: "/", label: "Home", icon: <House /> },
     { to: "/discover", label: "Discover", icon: <Compass /> },
     { to: "/create", label: "Create", icon: <SquarePlus /> },
     { to: "/notifications", label: "Activity", icon: <span className="badge-wrap"><Bell />{badge && <span className="dot" aria-label={`${unread.data} unread`} />}</span> },
+    { to: "/communities", label: "Communities", icon: <Users />, desktop: true },
     { to: "/agents", label: "Agents", icon: <span className="nav-agent"><AgentGlyph size={22} /></span> },
     { to: `/u/${me.username}`, label: "Profile", icon: <Avatar user={me} size={26} /> },
   ];
@@ -124,7 +125,7 @@ function Shell({ me }: { me: Me }) {
         <Route path={path} me={me} />
       </main>
       <nav className="bottombar" aria-label="Main">
-        {nav.map((n) => (
+        {nav.filter((n) => !n.desktop).map((n) => (
           <Link key={n.to} to={n.to} className={`tab ${active(n.to) ? "active" : ""}`} aria-label={n.label} aria-current={active(n.to) ? "page" : undefined}>
             {n.icon}
           </Link>
@@ -137,7 +138,7 @@ function Shell({ me }: { me: Me }) {
 function Route({ path, me }: { path: string; me: Me }) {
   const [, section, arg] = path.split(/[?#]/)[0]!.split("/");
   useEffect(() => {
-    const titles: Record<string, string> = { discover: "Discover", create: "New post", notifications: "Activity", settings: "Settings", p: "Post", agents: "Agents", t: "Topic" };
+    const titles: Record<string, string> = { discover: "Discover", create: "New post", notifications: "Activity", settings: "Settings", p: "Post", agents: "Agents", t: "Topic", communities: "Communities", c: "Community" };
     document.title = section === "u" && arg ? `@${decodeURIComponent(arg)} · Frame` : titles[section ?? ""] ? `${titles[section!]} · Frame` : "Frame";
   }, [section, arg]);
   switch (section) {
@@ -150,6 +151,10 @@ function Route({ path, me }: { path: string; me: Me }) {
       return arg ? <TopicPage key={arg} topic={decodeURIComponent(arg)} /> : <Discover />;
     case "agents":
       return <Agents me={me} />;
+    case "communities":
+      return <Communities />;
+    case "c":
+      return arg ? <CommunityPage key={arg} slug={decodeURIComponent(arg)} /> : <Communities />;
     case "create":
       return <Create />;
     case "notifications":

@@ -6,7 +6,7 @@
  * `via` naming that agent.
  */
 import { fail, type MutationCtx } from "@feltdb/feltkit";
-import { RESIDENTS, comments, media, postTopics, posts, profiles, reactions, tasks } from "./app.js";
+import { RESIDENTS, comments, media, memberships, postTopics, posts, profiles, reactions, tasks } from "./app.js";
 import { canSee, mentionsIn, notify, record, topicsIn, type CommentDoc, type PostDoc, type ProfileDoc, type ReactionKind } from "./_frame.js";
 
 export const EMOJI: Record<ReactionKind, string> = { like: "❤️", celebrate: "🎉", insightful: "💡", funny: "😄", wow: "😮", support: "🙏" };
@@ -39,20 +39,24 @@ async function mentions(ctx: MutationCtx, actor: ProfileDoc, post: PostDoc, text
 export async function publish(
   ctx: MutationCtx,
   actor: ProfileDoc,
-  input: { text: string; visibility: "public" | "followers"; media: Array<{ fileId: string; width: number; height: number }> },
+  input: { text: string; visibility: "public" | "followers"; media: Array<{ fileId: string; width: number; height: number }>; communityId?: string },
   via?: ProfileDoc,
 ) {
+  // Posting into a community needs membership in it (the author's, also when an agent posts for them).
+  if (input.communityId && !(await ctx.db.find(memberships, { communityId: input.communityId, profileId: actor.id })).length) {
+    fail("FORBIDDEN", "Join the community to post in it.");
+  }
   const text = input.text.trim();
   if (!text && input.media.length === 0) fail("INVALID_ARGUMENT", "A post needs a photo or some text.");
   const now = Date.now();
   const topics = topicsIn(text);
-  const id = await ctx.db.insert(posts, { authorId: actor.id, text, visibility: input.visibility, topics, createdAt: now, ...(via ? { viaAgentId: via.id } : {}) });
+  const id = await ctx.db.insert(posts, { authorId: actor.id, text, visibility: input.visibility, topics, createdAt: now, ...(via ? { viaAgentId: via.id } : {}), ...(input.communityId ? { communityId: input.communityId } : {}) });
   // media.fileId is unique: an upload is published at most once (FeltDB refuses a second time).
   for (const [position, m] of input.media.entries()) await ctx.db.insert(media, { postId: id, fileId: m.fileId, width: m.width, height: m.height, position });
   for (const topic of topics) await ctx.db.insert(postTopics, { postId: id, topic, createdAt: now });
   const post = (await ctx.db.get(posts, id))!;
   await mentions(ctx, actor, post, text, {}, via);
-  await record(ctx, via ?? actor, "post.created", { postId: id, visibility: input.visibility, images: input.media.length }, via ? actor : undefined);
+  await record(ctx, via ?? actor, "post.created", { postId: id, visibility: input.visibility, images: input.media.length, communityId: input.communityId }, via ? actor : undefined);
   return id;
 }
 
@@ -71,7 +75,7 @@ export async function addComment(ctx: MutationCtx, actor: ProfileDoc, post: Post
     parent = await ctx.db.get(comments, input.parentId);
     if (!parent || parent.postId !== post.id || parent.deletedAt) fail("NOT_FOUND", "That comment does not exist.");
   }
-  const id = await ctx.db.insert(comments, { postId: post.id, authorId: actor.id, text, createdAt: Date.now(), ...(parent ? { parentId: parent.id } : {}), ...(via ? { viaAgentId: via.id } : {}) });
+  const id = await ctx.db.insert(comments, { postId: post.id, authorId: actor.id, text, root: !parent, createdAt: Date.now(), ...(parent ? { parentId: parent.id } : {}), ...(via ? { viaAgentId: via.id } : {}) });
   const postAuthor = (await ctx.db.get(profiles, post.authorId))!;
   const parentAuthor = parent ? await ctx.db.get(profiles, parent.authorId) : null;
   if (parentAuthor && parentAuthor.id !== actor.id) {

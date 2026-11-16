@@ -7,7 +7,7 @@
  * what an agent did, when, and for whom.
  */
 import { fail, s } from "@feltdb/feltkit";
-import { RESIDENTS, activity, app, comments, follows, postTopics, posts, profiles, reactions, sponsorships } from "./app.js";
+import { RESIDENTS, activity, app, comments, communities, follows, postTopics, posts, profiles, reactions, sponsorships } from "./app.js";
 import { Author, author, authorById, canSee, myProfile, notify, record, requirePerson, requireProfile, visiblePost } from "./_frame.js";
 import { addComment, react } from "./_social.js";
 
@@ -44,12 +44,15 @@ export const scout = app.agent("scout", {
     // Someone already named as an author is not named again.
     const others = people.filter((p) => !relatedAuthors.includes(p.username));
 
+    // Communities about these topics (newest 100 scanned; FeltDB has no array-membership query, GAP-14).
+    const spaces = topics.length ? (await ctx.db.find(communities, {}, { orderBy: [{ field: "createdAt", direction: "desc" }], limit: 100 })).filter((c) => c.topics.some((t) => wanted.has(t))).slice(0, 2) : [];
     let text: string;
     if (related.size || people.length) {
       text = `Found ${related.size} related frame${related.size === 1 ? "" : "s"} on ${topics.map((t) => `#${t}`).join(" ")}`;
       if (relatedAuthors.length) text += ` by ${relatedAuthors.map((u) => `@${u}`).join(", ")}`;
       if (others.length) text += `. Also into this: ${others.map((p) => `@${p.username}`).join(", ")}`;
       text += ".";
+      if (spaces.length) text += ` Community: ${spaces.map((c) => `c/${c.slug}`).join(", ")}.`;
     } else if (topics.length) {
       text = `Nothing else on ${topics.map((t) => `#${t}`).join(" ")} yet. You might be the first; I'll point others here.`;
     } else {

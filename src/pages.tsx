@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useFeltKit as useFeltKitClient, useMutation, useQueryState, useSession } from "@feltdb/feltkit/react";
 import type { ResultOf } from "@feltdb/feltkit/client";
-import { Bell, CalendarClock, Check, CircleSlash, Compass, Hash, KeyRound, MessageCircle, PenSquare, Search, ShieldCheck, Sparkles, X } from "lucide-react";
+import { Bell, CalendarClock, Check, CircleSlash, Compass, Hash, KeyRound, MessageCircle, PenSquare, Search, ShieldCheck, Sparkles, Users, X } from "lucide-react";
 import { api } from "../feltkit/_generated/api";
 import { AgentTag, Byline, Carousel, Conversation, Empty, Failure, FollowButton, Grid, ImagePicker, Name, PersonRow, PostCard, Reactions, Spinner, Via, VisibilityPicker, usePublishing, type Picked } from "./components";
 import { AgentGlyph, Avatar, Link, RichText, ago, emoji, navigate, plural, prepareImage, useSentinel } from "./lib";
@@ -118,15 +118,17 @@ export function Discover() {
         !results.data ? <Spinner /> : (
           <div className="results">
             {results.data.agents.length > 0 && <section><h2 className="section-title"><AgentGlyph size={13} /> Agents</h2>{results.data.agents.map((a) => <PersonRow key={a.id} person={a} />)}</section>}
+            {results.data.communities.length > 0 && <section><h2 className="section-title"><Users size={13} /> Communities</h2>{results.data.communities.map((c) => <Link key={c.slug} to={`/c/${c.slug}`} className="person-row"><span className="community-mark" aria-hidden>{c.name.slice(0, 1)}</span><span className="person-text"><strong>{c.name}</strong><span className="muted small">c/{c.slug} · {c.description}</span></span></Link>)}</section>}
             {results.data.people.length > 0 && <section><h2 className="section-title">People</h2>{results.data.people.map((a) => <PersonRow key={a.id} person={a} />)}</section>}
             {results.data.topics.length > 0 && <section><h2 className="section-title">Topics</h2><div className="chips">{results.data.topics.map((t) => <Link key={t.topic} to={`/t/${t.topic}`} className="chip">#{t.topic} <span className="muted">{t.posts}</span></Link>)}</div></section>}
             {results.data.posts.length > 0 && <section><h2 className="section-title">Posts</h2><Grid posts={results.data.posts} /></section>}
-            {!results.data.agents.length && !results.data.people.length && !results.data.topics.length && !results.data.posts.length && <Empty icon={<Search size={28} strokeWidth={1.4} />} title={`Nothing for “${q}”`}>Try a #topic or someone's name.</Empty>}
+            {!results.data.agents.length && !results.data.communities.length && !results.data.people.length && !results.data.topics.length && !results.data.posts.length && <Empty icon={<Search size={28} strokeWidth={1.4} />} title={`Nothing for “${q}”`}>Try a #topic or someone's name.</Empty>}
           </div>
         )
       ) : (
         <>
           <AgentStrip />
+          <CommunityStrip />
           <Trending />
           <h2 className="section-title">Latest</h2>
           {!recent.data ? <Spinner /> : recent.data.posts.length ? <Grid posts={recent.data.posts} /> : <Empty icon={<Compass size={28} strokeWidth={1.4} />} title="Nothing here yet">Be the first to share something.</Empty>}
@@ -153,6 +155,17 @@ function AgentStrip() {
   );
 }
 
+function CommunityStrip() {
+  const list = useQueryState(api.communities.list, {});
+  if (!list.data?.length) return null;
+  return (
+    <section>
+      <h2 className="section-title"><Users size={13} /> Communities <Link to="/communities" className="link-more small">All →</Link></h2>
+      <div className="community-list compact">{list.data.slice(0, 4).map((c) => <CommunityCard key={c.id} c={c} />)}</div>
+    </section>
+  );
+}
+
 export function TopicPage({ topic }: { topic: string }) {
   const posts = useQueryState(api.posts.byTopic, { topic, limit: 30 });
   return (
@@ -171,6 +184,9 @@ export function Create() {
   const [picked, setPicked] = useState<Picked[]>([]);
   const [text, setText] = useState("");
   const [visibility, setVisibility] = useState<"public" | "followers">("public");
+  const mine = useQueryState(api.communities.list, { mine: true });
+  const [community, setCommunity] = useState(new URLSearchParams(location.search).get("c") ?? "");
+  const communityId = mine.data?.find((c) => c.slug === community)?.id;
   const [later, setLater] = useState(false);
   const [when, setWhen] = useState(() => new Date(Date.now() + 3_600_000 - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16));
   const [busy, setBusy] = useState(false);
@@ -185,7 +201,7 @@ export function Create() {
         await schedule({ kind: "publish", draft: { text, visibility, media }, runAt: new Date(when).getTime() });
         navigate("/agents", true);
       } else {
-        navigate(`/p/${await create({ text, media, visibility })}`, true);
+        navigate(`/p/${await create({ text, media, visibility, ...(communityId ? { communityId } : {}) })}`, true);
       }
     } catch (err) {
       setError((err as Error).message);
@@ -198,6 +214,15 @@ export function Create() {
       <ImagePicker picked={picked} onChange={setPicked} />
       <textarea placeholder="What's happening? Use #topics and @mentions — mention @scout to find related work." maxLength={2200} rows={4} value={text} onChange={(e) => setText(e.target.value)} aria-label="Text" />
       <VisibilityPicker value={visibility} onChange={setVisibility} />
+      {mine.data && mine.data.length > 0 && (
+        <label className="field">
+          <span>Post in</span>
+          <select value={community} onChange={(e) => setCommunity(e.target.value)} disabled={later}>
+            <option value="">Your profile only</option>
+            {mine.data.map((c) => <option key={c.id} value={c.slug}>c/{c.slug} — {c.name}</option>)}
+          </select>
+        </label>
+      )}
       <label className="toggle-row">
         <input type="checkbox" checked={later} onChange={(e) => setLater(e.target.checked)} />
         <span><CalendarClock size={15} /> Have <strong>Concierge</strong> publish it later, as you</span>
@@ -226,13 +251,21 @@ export function PostView({ id }: { id: string }) {
     <div className={`post-view ${p.media.length ? "" : "text-only"}`}>
       {p.media.length > 0 && <div className="post-view-media"><Carousel media={p.media} alt={p.text} /></div>}
       <div className="post-view-side">
-        <header className="post-head"><Byline who={p.author} via={p.via} at={p.createdAt} visibility={p.visibility} edited={p.editedAt !== null} /></header>
+        <header className="post-head"><Byline who={p.author} via={p.via} at={p.createdAt} visibility={p.visibility} edited={p.editedAt !== null} community={p.community} /></header>
         {p.text && <p className={`post-text ${p.media.length ? "" : "big"}`}><RichText text={p.text} /></p>}
         <div className="post-actions"><Reactions postId={p.id} summary={p.reactions} /><span className="muted small"><MessageCircle size={14} /> {p.commentCount}</span></div>
+        {p.community && <ModerateInCommunity postId={p.id} slug={p.community.slug} />}
         <Conversation postId={p.id} focus={focus} />
       </div>
     </div>
   );
+}
+
+function ModerateInCommunity({ postId, slug }: { postId: string; slug: string }) {
+  const c = useQueryState(api.communities.get, { slug });
+  const remove = useMutation(api.communities.removePost);
+  if (!c.data?.myRole || c.data.myRole === "member") return null;
+  return <button className="link-btn small" onClick={() => confirm(`Take this post out of c/${slug}? It stays on its author's profile.`) && void remove({ postId })}>Remove from c/{slug}</button>;
 }
 
 // ── Notifications ──────────────────────────────────────────────────────────────────────────
@@ -658,3 +691,104 @@ function AvatarField({ me }: { me: Me }) {
   );
 }
 
+
+// ── Communities ────────────────────────────────────────────────────────────────────────────
+type CommunityView = NonNullable<ResultOf<typeof api.communities.get>>;
+
+function CommunityCard({ c }: { c: CommunityView }) {
+  return (
+    <Link to={`/c/${c.slug}`} className="community-card">
+      <span className="community-mark" aria-hidden>{c.name.slice(0, 1)}</span>
+      <span className="community-text">
+        <strong>{c.name}</strong>
+        <span className="muted small">c/{c.slug} · {plural(c.members, "member")}{c.agents ? ` · ${plural(c.agents, "agent")}` : ""}</span>
+        {c.description && <span className="small desc">{c.description}</span>}
+      </span>
+      {c.myRole && <span className="pill on">{c.myRole === "member" ? "Joined" : c.myRole}</span>}
+    </Link>
+  );
+}
+
+export function Communities() {
+  const all = useQueryState(api.communities.list, {});
+  const create = useMutation(api.communities.create);
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ name: "", slug: "", description: "", topics: "" });
+  const [error, setError] = useState<string>();
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(undefined);
+    try {
+      await create({ name: form.name, slug: form.slug, description: form.description, topics: form.topics.split(/[,\s]+/).filter(Boolean) });
+      navigate(`/c/${form.slug}`);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  return (
+    <div className="page">
+      <header className="page-head">
+        <h1 className="page-title"><Users size={22} /> Communities</h1>
+        <button className="primary small" onClick={() => setOpen((o) => !o)}>{open ? "Close" : "Start one"}</button>
+      </header>
+      {open && (
+        <form className="panel stack-form" onSubmit={submit}>
+          <label className="field"><span>Name</span><input value={form.name} maxLength={60} required onChange={(e) => setForm({ ...form, name: e.target.value, slug: form.slug || "" })} /></label>
+          <label className="field"><span>Address</span><input value={form.slug} placeholder={form.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")} pattern="[a-z0-9-]{3,40}" required onChange={(e) => setForm({ ...form, slug: e.target.value.toLowerCase() })} /><small className="muted">c/{form.slug || "…"}</small></label>
+          <label className="field"><span>What it's about</span><textarea value={form.description} maxLength={400} rows={2} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+          <label className="field"><span>Topics</span><input value={form.topics} placeholder="film, darkroom" onChange={(e) => setForm({ ...form, topics: e.target.value })} /><small className="muted">Scout points people here from posts on these topics.</small></label>
+          {error && <p className="form-error" role="alert">{error}</p>}
+          <button className="primary">Create</button>
+        </form>
+      )}
+      {!all.data ? <Spinner /> : all.data.length === 0 ? <Empty icon={<Users size={28} strokeWidth={1.4} />} title="No communities yet">Start one around something you care about. People and agents can join.</Empty> : (
+        <div className="community-list">{all.data.map((c) => <CommunityCard key={c.id} c={c} />)}</div>
+      )}
+    </div>
+  );
+}
+
+export function CommunityPage({ slug }: { slug: string }) {
+  const c = useQueryState(api.communities.get, { slug });
+  const feed = useQueryState(api.communities.feed, { slug, limit: 30 });
+  const members = useQueryState(api.communities.members, { slug });
+  const join = useMutation(api.communities.join);
+  const leave = useMutation(api.communities.leave);
+  const [busy, setBusy] = useState(false);
+  if (c.error) return <Failure error={c.error} />;
+  if (c.data === undefined) return <Spinner />;
+  if (c.data === null) return <Empty title="No such community" />;
+  const x = c.data;
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      await (x.myRole ? leave({ slug }) : join({ slug }));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="page community">
+      <header className="community-head">
+        <span className="community-mark big" aria-hidden>{x.name.slice(0, 1)}</span>
+        <div className="profile-main">
+          <h1 className="page-title">{x.name}</h1>
+          <p className="muted">c/{x.slug} · {plural(x.members, "member")}{x.agents ? <> · <AgentGlyph size={11} /> {plural(x.agents, "agent")}</> : null} · {plural(x.posts, "post")}</p>
+          {x.description && <p>{x.description}</p>}
+          {x.topics.length > 0 && <div className="chips">{x.topics.map((t) => <Link key={t} to={`/t/${t}`} className="chip">#{t}</Link>)}</div>}
+          <div className="profile-actions">
+            {x.myRole !== "owner" && <button className={x.myRole ? "secondary small" : "primary small"} disabled={busy} onClick={() => void toggle()}>{x.myRole ? "Leave" : "Join"}</button>}
+            {x.myRole && <Link to={`/create?c=${x.slug}`} className="button secondary small"><PenSquare size={14} /> Post here</Link>}
+            {x.myRole && x.myRole !== "member" && <span className="pill on">{x.myRole}</span>}
+          </div>
+        </div>
+      </header>
+      {members.data && members.data.length > 0 && (
+        <div className="member-strip" aria-label="Members">
+          {members.data.slice(0, 18).map((m) => <Link key={m.profile.id} to={`/u/${m.profile.username}`} title={`${m.profile.username} (${m.role})`}><Avatar user={m.profile} size={34} /></Link>)}
+        </div>
+      )}
+      {!feed.data ? <Spinner /> : feed.data.posts.length ? <Grid posts={feed.data.posts} /> : <Empty title="Nothing posted yet">{x.myRole ? "Be the first." : "Join to post here."}</Empty>}
+    </div>
+  );
+}

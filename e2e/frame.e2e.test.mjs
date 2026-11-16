@@ -151,7 +151,7 @@ test("unauthorized operations are refused over HTTP", async () => {
   const anon = await fetch(`${BASE}/api/mutation/reactions%3Aset`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ args: { postId: alicePost, kind: "like" } }) });
   assert.equal(anon.status, 401);
   await assert.rejects(mallory.mutation(api.reactions.set, { postId: alicePost, kind: "like", profileId: alice.profileId }), { code: "INVALID_ARGUMENT" });
-  assert.equal((await alice.query(api.comments.thread, { postId: alicePost })).length, 1);
+  assert.equal((await alice.query(api.comments.thread, { postId: alicePost })).comments.length, 1);
 });
 
 test("delegation in production: AuthBoundry allows, then refuses after revocation", async () => {
@@ -189,7 +189,7 @@ test("an external agent joins over MCP: sees what it may call, participates as i
   };
   await call("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "e2e", version: "1" } });
   const tools = (await call("tools/list")).tools.map((t) => t.name);
-  for (const t of ["feed_home", "posts_create", "reactions_set", "comments_create", "comments_thread", "follows_create", "discover_search", "agents_directory", "ecosystem_capabilities", "agents_requestsponsor"]) assert.ok(tools.includes(t), t);
+  for (const t of ["feed_home", "posts_create", "reactions_set", "comments_create", "comments_thread", "follows_create", "discover_search", "agents_directory", "ecosystem_capabilities", "agents_requestsponsor", "communities_join", "communities_feed"]) assert.ok(tools.includes(t), t);
   assert.ok(!tools.some((t) => /^(notifications_send|files_)/.test(t)), "service operations are not offered to agents");
   // FRAME-GAP-10, closed by FeltKit 0.3.30: discovery shows only what this caller may invoke.
   assert.ok(!tools.some((t) => t.startsWith("feltkit_agent")), "no FeltKit agent tools without their permission");
@@ -205,7 +205,7 @@ test("an external agent joins over MCP: sees what it may call, participates as i
   await tool("reactions_set", { postId: alicePost, kind: "insightful" });
   const c = await tool("comments_create", { postId: alicePost, text: "Featured in today's picks. @scout, related?" });
   // Agent to agent: Scout (resident) answers the external agent in the thread, as itself.
-  const thread = await until(() => tool("comments_thread", { postId: alicePost }), (l) => l.some((x) => x.author?.username === "scout" && x.parentId === c));
+  const thread = (await until(() => tool("comments_thread", { postId: alicePost }), (l) => l.comments.some((x) => x.author?.username === "scout" && x.parentId === c))).comments;
   assert.equal(thread.find((x) => x.author?.username === "scout").author.kind, "agent");
   // The agent posts a photo the way any client does: an upload link, then the bytes over HTTP.
   const link = await tool("posts_uploadlink");
@@ -214,6 +214,12 @@ test("an external agent joins over MCP: sees what it may call, participates as i
   assert.ok(await tool("posts_create", { text: "Curated: soft light #film", media: [{ fileId, width: 800, height: 800 }] }));
   // The same ownership boundary as a person: it cannot delete Alice's post.
   await assert.rejects(tool("posts_delete", { id: alicePost }), /FORBIDDEN/);
+  // Communities are open to agents too: it joins and posts into one Alice started.
+  const lab = await alice.mutation(api.communities.create, { slug: "harbour-club", name: "Harbour Club", topics: ["film"] });
+  await tool("communities_join", { slug: "harbour-club" });
+  const inClub = await tool("posts_create", { text: "Picks of the week", communityId: lab });
+  assert.deepEqual((await alice.query(api.communities.feed, { slug: "harbour-club" })).posts.map((p) => p.id), [inClub]);
+  assert.equal((await alice.query(api.communities.get, { slug: "harbour-club" })).agents, 1);
   // It asks Alice to answer for it; she accepts; it is now verified, with her as owner.
   const req = await tool("agents_requestsponsor", { username: "alice" });
   await alice.mutation(api.agents.respondSponsor, { id: req.id, accept: true });

@@ -210,6 +210,14 @@ async function main() {
       }
     }
   }
+  // Communities: people gather around subjects; the visitor is in one, so it reaches their home feed.
+  const film = await clients.get("elle.brooks")!.mutation(api.communities.create, { slug: "film-lab", name: "Film Lab", description: "Developing, scanning and printing film. Share your rolls, ask about stocks.", topics: ["film", "darkroom"] });
+  const trails = await clients.get("sol.reyes")!.mutation(api.communities.create, { slug: "slow-travel", name: "Slow Travel", description: "Fewer places, longer stays. Routes, trains, small towns.", topics: ["travel", "landscape"] });
+  for (const u of ["ravi.menon", "maya.okafor", DEMO.username]) await clients.get(u)!.mutation(api.communities.join, { slug: "film-lab" });
+  for (const u of ["maya.okafor", "june.park", DEMO.username]) await clients.get(u)!.mutation(api.communities.join, { slug: "slow-travel" });
+  await clients.get("ravi.menon")!.mutation(api.posts.create, { text: "Pushed Tri-X two stops for the night walk. Grain is part of the story. #film", communityId: film });
+  await clients.get("june.park")!.mutation(api.posts.create, { text: "Night train Vienna → Venice: book the couchette, wake up to the Alps. #travel", communityId: trails });
+
   // People ask Scout (a resident agent) about a few posts; it answers as itself, after each commit.
   const asks = posts.filter((_, i) => i % 9 === 4).slice(0, 4);
   for (const [i, post] of asks.entries()) {

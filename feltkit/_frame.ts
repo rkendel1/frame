@@ -4,7 +4,7 @@
  * Not a function module (the leading underscore).
  */
 import { fail, s, type DatabaseReader, type Doc, type MutationCtx, type QueryCtx } from "@feltdb/feltkit";
-import { REACTIONS, activity, comments, follows, media, notificationSettings, posts, profiles, reactions, type NOTIFICATION_TYPES } from "./app.js";
+import { REACTIONS, activity, comments, communities, follows, media, notificationSettings, posts, profiles, reactions, type NOTIFICATION_TYPES } from "./app.js";
 
 export type ProfileDoc = Doc<typeof profiles.shape>;
 export type PostDoc = Doc<typeof posts.shape>;
@@ -138,6 +138,7 @@ export const PostCard = s.object({
   createdAt: s.number(),
   editedAt: s.nullable(s.number()),
   author: Author,
+  community: s.nullable(s.object({ slug: s.string(), name: s.string() })),
   /** The agent that published it on the author's behalf. */
   via: s.nullable(Author),
   reactions: ReactionSummary,
@@ -157,18 +158,19 @@ export async function postMedia(db: DatabaseReader, postId: string) {
 export function cards(db: DatabaseReader, list: PostDoc[], meId: string | null, commentLimit = 2) {
   return Promise.all(
     list.map(async (p) => {
-      const [a, via, summary, all, images] = await Promise.all([
+      const [a, via, summary, all, images, community] = await Promise.all([
         db.get(profiles, p.authorId),
         authorById(db, p.viaAgentId),
         reactionSummary(db, `post:${p.id}`, meId),
         db.find(comments, { postId: p.id }),
         postMedia(db, p.id),
+        p.communityId ? db.get(communities, p.communityId) : null,
       ]);
       const live = all.filter((c) => !c.deletedAt);
       const recent = commentLimit ? live.filter((c) => !c.parentId).sort((x, y) => y.createdAt - x.createdAt).slice(0, commentLimit).reverse() : [];
       return {
         id: p.id, text: p.text, visibility: p.visibility, topics: p.topics, media: images, createdAt: p.createdAt, editedAt: p.editedAt ?? null,
-        author: author(a!), via, reactions: summary, commentCount: live.length, mine: p.authorId === meId,
+        author: author(a!), community: community ? { slug: community.slug, name: community.name } : null, via, reactions: summary, commentCount: live.length, mine: p.authorId === meId,
         comments: await Promise.all(recent.map((c) => commentView(db, c, meId))),
       };
     }),
@@ -191,12 +193,12 @@ export function gridItems(db: DatabaseReader, list: PostDoc[]) {
  * One page of visible posts newest-first, `before` a createdAt cursor, from one author or everyone's
  * public posts. Reads past hidden posts (bounded) so a page is not short because of them.
  */
-export async function page(db: DatabaseReader, viewer: ProfileDoc | null, opts: { authorId?: string; before?: number; limit: number }) {
+export async function page(db: DatabaseReader, viewer: ProfileDoc | null, opts: { authorId?: string; communityId?: string; before?: number; limit: number }) {
   const out: PostDoc[] = [];
   let before = opts.before;
   for (let round = 0; round < 5 && out.length <= opts.limit; round++) {
     const where = [
-      ...(opts.authorId ? [{ field: "authorId", eq: opts.authorId }] : [{ field: "visibility", eq: "public" }]),
+      ...(opts.authorId ? [{ field: "authorId", eq: opts.authorId }] : opts.communityId ? [{ field: "communityId", eq: opts.communityId }] : [{ field: "visibility", eq: "public" }]),
       ...(before !== undefined ? [{ field: "createdAt", lt: before }] : []),
     ];
     const { records } = await db.query(posts, { where, orderBy: [{ field: "createdAt", direction: "desc" }], limit: opts.limit + 1 });

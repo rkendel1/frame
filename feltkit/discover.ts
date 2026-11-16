@@ -5,10 +5,11 @@
  * drift from what the server enforces. Discovery grants nothing: each call is authorized again.
  */
 import { s } from "@feltdb/feltkit";
-import { DELEGABLE, app, postTopics, posts, profiles } from "./app.js";
+import { DELEGABLE, app, communities, postTopics, posts, profiles } from "./app.js";
 import { Author, GridItem, author, canSee, gridItems, myProfile } from "./_frame.js";
 import * as agentsModule from "./agents.js";
 import * as commentsModule from "./comments.js";
+import * as communitiesModule from "./communities.js";
 import * as followsModule from "./follows.js";
 import * as inboxModule from "./inbox.js";
 import * as postsModule from "./posts.js";
@@ -28,15 +29,16 @@ async function trending(db: Parameters<typeof canSee>[0], limit: number, match?:
 export const search = app.query({
   access: "frame.read",
   args: { text: s.string({ minLength: 1, maxLength: 100 }) },
-  returns: s.object({ people: s.array(Author), agents: s.array(Author), posts: s.array(GridItem), topics: s.array(Topic) }),
-  capability: { name: "discover.search", description: "Search Frame at once: people, agents (by name, bio), posts the caller may see, and #topics." },
+  returns: s.object({ people: s.array(Author), agents: s.array(Author), posts: s.array(GridItem), topics: s.array(Topic), communities: s.array(s.object({ slug: s.string(), name: s.string(), description: s.string() })) }),
+  capability: { name: "discover.search", description: "Search Frame at once: people, agents (by name, bio), communities, posts the caller may see, and #topics." },
   handler: async (ctx, { text }) => {
     const me = await myProfile(ctx);
     const q = text.trim().replace(/^[#@]/, "");
-    const [found, matches, topics] = await Promise.all([
+    const [found, matches, topics, groups] = await Promise.all([
       q ? ctx.db.search(profiles, { text: q, limit: 30 }) : [],
       q ? ctx.db.search(posts, { text: q, limit: 40 }) : [],
       trending(ctx.db, 8, q.toLowerCase()),
+      q ? ctx.db.search(communities, { text: q, limit: 10 }) : [],
     ]);
     const visible = [];
     for (const p of matches) if (visible.length < 18 && (await canSee(ctx.db, p, me))) visible.push(p);
@@ -45,6 +47,7 @@ export const search = app.query({
       agents: found.filter((p) => p.kind === "agent").slice(0, 12).map(author),
       posts: await gridItems(ctx.db, visible),
       topics,
+      communities: groups.map((c) => ({ slug: c.slug, name: c.name, description: c.description })),
     };
   },
 });
@@ -71,7 +74,7 @@ const Capability = s.object({
   inputs: s.array(s.string()),
 });
 
-const MODULES = [postsModule, commentsModule, reactionsModule, followsModule, profilesModule, inboxModule, agentsModule, tasksModule, { search, topics }];
+const MODULES = [postsModule, commentsModule, communitiesModule, reactionsModule, followsModule, profilesModule, inboxModule, agentsModule, tasksModule, { search, topics }];
 
 export const capabilities = app.query({
   access: "frame.read",
