@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { SignIn, useMutation, useQueryState, useSession } from "@feltdb/feltkit/react";
-import { Compass, Heart, House, SquarePlus } from "lucide-react";
+import { Bell, Compass, House, SquarePlus } from "lucide-react";
+import type { ResultOf } from "@feltdb/feltkit/client";
 import { api } from "../feltkit/_generated/api";
-import { Avatar, Link, navigate, usePath } from "./lib";
-import { Create, Explore, Home, Notifications, PostView, Profile, Settings } from "./pages";
+import { AgentGlyph, Avatar, Link, usePath } from "./lib";
+import { Agents, Create, Discover, Home, Notifications, PostView, Profile, Settings, TopicPage } from "./pages";
 
 export function App() {
   const { session } = useSession();
@@ -36,7 +37,7 @@ function Welcome() {
       </section>
       <section className="welcome-form">
         <Wordmark size={44} />
-        <p className="tagline">See the world through the people you follow.</p>
+        <p className="tagline">Where people and agents share, discover and work together.</p>
         <SignIn bare initialMode="sign-in" />
       </section>
     </main>
@@ -57,11 +58,12 @@ function Onboarding({ name }: { name?: string }) {
   const { signOut } = useSession();
   const [username, setUsername] = useState((name ?? "").toLowerCase().replace(/[^a-z0-9._]/g, "").slice(0, 30));
   const [displayName, setDisplayName] = useState(name ?? "");
+  const [interests, setInterests] = useState("");
   const [error, setError] = useState<string>();
   const submit = (e: FormEvent) => {
     e.preventDefault();
     setError(undefined);
-    create({ username, displayName }).catch((err: Error) => setError(err.message));
+    create({ username, displayName, interests: interests.split(/[,\s]+/).filter(Boolean) }).catch((err: Error) => setError(err.message));
   };
   return (
     <main className="welcome single">
@@ -77,6 +79,10 @@ function Onboarding({ name }: { name?: string }) {
           <span>Name</span>
           <input value={displayName} maxLength={60} required onChange={(e) => setDisplayName(e.target.value)} />
         </label>
+        <label className="field">
+          <span>Interests <span className="muted">(optional)</span></span>
+          <input value={interests} placeholder="film, travel, street" onChange={(e) => setInterests(e.target.value)} />
+        </label>
         {error && <p className="form-error" role="alert">{error}</p>}
         <button className="primary wide">Continue</button>
         <button type="button" className="link-btn" onClick={() => void signOut()}>Use another account</button>
@@ -85,7 +91,7 @@ function Onboarding({ name }: { name?: string }) {
   );
 }
 
-type Me = { id: string; username: string; displayName: string; avatarFileId?: string; bio?: string };
+type Me = NonNullable<ResultOf<typeof api.profiles.me>>;
 
 function Shell({ me }: { me: Me }) {
   const path = usePath();
@@ -93,9 +99,10 @@ function Shell({ me }: { me: Me }) {
   const badge = (unread.data ?? 0) > 0 && !path.startsWith("/notifications");
   const nav: Array<{ to: string; label: string; icon: ReactNode; mobile?: boolean }> = [
     { to: "/", label: "Home", icon: <House /> },
-    { to: "/explore", label: "Explore", icon: <Compass /> },
+    { to: "/discover", label: "Discover", icon: <Compass /> },
     { to: "/create", label: "Create", icon: <SquarePlus /> },
-    { to: "/notifications", label: "Notifications", icon: <span className="badge-wrap"><Heart />{badge && <span className="dot" aria-label="Unread" />}</span> },
+    { to: "/notifications", label: "Activity", icon: <span className="badge-wrap"><Bell />{badge && <span className="dot" aria-label={`${unread.data} unread`} />}</span> },
+    { to: "/agents", label: "Agents", icon: <span className="nav-agent"><AgentGlyph size={22} /></span> },
     { to: `/u/${me.username}`, label: "Profile", icon: <Avatar user={me} size={26} /> },
   ];
   const active = (to: string) => (to === "/" ? path === "/" : path.startsWith(to));
@@ -128,16 +135,21 @@ function Shell({ me }: { me: Me }) {
 }
 
 function Route({ path, me }: { path: string; me: Me }) {
-  const [, section, arg] = path.split("/");
+  const [, section, arg] = path.split(/[?#]/)[0]!.split("/");
   useEffect(() => {
-    const titles: Record<string, string> = { explore: "Explore", create: "New post", notifications: "Notifications", settings: "Edit profile", p: "Post" };
+    const titles: Record<string, string> = { discover: "Discover", create: "New post", notifications: "Activity", settings: "Settings", p: "Post", agents: "Agents", t: "Topic" };
     document.title = section === "u" && arg ? `@${decodeURIComponent(arg)} · Frame` : titles[section ?? ""] ? `${titles[section!]} · Frame` : "Frame";
   }, [section, arg]);
   switch (section) {
     case "":
-      return <Home />;
+      return <Home me={me} />;
+    case "discover":
     case "explore":
-      return <Explore />;
+      return <Discover />;
+    case "t":
+      return arg ? <TopicPage key={arg} topic={decodeURIComponent(arg)} /> : <Discover />;
+    case "agents":
+      return <Agents me={me} />;
     case "create":
       return <Create />;
     case "notifications":
@@ -145,9 +157,9 @@ function Route({ path, me }: { path: string; me: Me }) {
     case "settings":
       return <Settings me={me} />;
     case "u":
-      return arg ? <Profile key={arg} username={decodeURIComponent(arg)} /> : <Home />;
+      return arg ? <Profile key={arg} username={decodeURIComponent(arg)} /> : <Home me={me} />;
     case "p":
-      return arg ? <PostView key={arg} id={decodeURIComponent(arg)} /> : <Home />;
+      return arg ? <PostView key={arg} id={decodeURIComponent(arg)} /> : <Home me={me} />;
     default:
       return <div className="state"><h3>Page not found</h3><Link to="/">Go home</Link></div>;
   }
