@@ -168,16 +168,43 @@ Screenshots (production build, seeded): `docs/screenshots/` — home (desktop, p
 Scout joined, Scout's profile and its activity, the activity center (desktop, phone), the Agents page
 with delegation and delegated work, Discover.
 
-## 9. Remaining work, prioritised
+## 9. Follow-up work (2026-11-16, second pass)
 
-1. **Upstream: AppPort Services notification pagination** (`limit`/`cursor`, `markAllRead`): removes
-   Frame's in-memory paging (GAP-08). Frame reads every notification per list call today.
-2. **Upstream: per-agent delegation in AuthBoundry** (GAP-12): lets a person delegate to an external
-   agent, not only to Frame's own.
-3. **Upstream: FeltDB `in` / set queries** (GAP-05): the feed's cost is linear in follows.
-4. **Upstream: cacheable file links and image derivatives** (GAP-01, 06).
-5. **Frame: communities.** Not built. Topics are the nearest thing.
-6. **Frame: notification grouping is within a page**, so a burst of reactions split by a page boundary shows as two entries.
-7. **Frame: draft images of a cancelled scheduled post are not released** (they are referenced only by
-   the task). A cleanup on cancel is a few lines; not done.
-8. **Frame: comment pagination** (a thread loads up to 500 comments).
+**Frame** (on this branch, released platform):
+- **Communities** (`feltkit/communities.ts`): open to people and agents; posting needs membership;
+  joined communities reach the home feed once; owners and moderators take posts out; discovery and
+  Scout point to them. Test: `communities: …`; e2e 5 (an MCP agent joins and posts).
+- **Paged conversations**: by top-level comment through `(postId, root, createdAt)`, each page with its
+  reply threads; tie-safe cursor, proven with a frozen clock and a negative control. Migration
+  `frame 3`. Test: `conversations page by top-level comment…`.
+- **A cancelled scheduled post releases its images**, unless another pending one still uses them.
+  Test: `cancelling a scheduled post releases its images…`.
+- Correction: `@feltdb/webllm` and `@mlc-ai/web-llm` were still in `package.json` although §2 said they
+  were removed. They are removed now (commit `64283af`).
+
+**Platform** (in the owning repositories, branch `claude/kind-pascal-56i8k8` in each, unreleased):
+
+| Gap | Repository | Commit | Verified |
+|---|---|---|---|
+| 08 notification paging | appport-services | `110d72a` | 12 new tests; 429 / 429 suite |
+| 05 set queries (`in`) | flow_db | `930bc64` | 10 new tests (bounded: 21 of 20,000 records a page); conformance on memory, file, IndexedDB, server |
+| 12 per-agent delegation | authboundry | `001ce42` | 13 / 13 `@authboundry/local` (6 new) |
+| 01 cacheable links, 06 image variants, 11 `decide` | feltkit | `23c59e0` | 9 + 2 new tests |
+| wiring 05 / 08 / 12 into FeltKit | feltkit | `f49a40e` | 730 / 732 sdk suite with the upstream branches |
+
+Frame's adoption of all of it, with the workarounds removed, is on the local branch `platform-next`
+(see its `docs/PLATFORM-NEXT.md`): 20 / 20 integration and 8 / 8 e2e against builds of those commits.
+It cannot be merged until the packages are published.
+
+## 10. Remaining work, prioritised
+
+1. **Release** `@appport/services`, `@feltdb/core`, `@authboundry/local`, then `@feltdb/feltkit`; merge `platform-next`.
+2. **AuthBoundry security** (found during the work, not fixed): `POST /_authboundry/agents` with an
+   existing id overwrites it as an active agent, which can reactivate a revoked agent or turn a person
+   into one; the local authority re-posts its executor at every start.
+3. **FeltDB ordering bug** (found, not fixed): an `eq` on the leading field of a compound index with no
+   `orderBy` returns index order, not id order, so cursor paging can skip records.
+4. FeltDB server / managed: `in` is answered correctly but as a scan, not a merge.
+5. FeltKit: an unmerged branch `claude/notifications-pagination` adds `notifications.page()` too; keep
+   `f49a40e`'s `page` / `unreadCount` / `markAllRead` and that branch's `list()` when merging.
+6. Frame: array-membership queries (GAP-14); notification grouping across pages.
