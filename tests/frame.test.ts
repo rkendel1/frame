@@ -302,11 +302,11 @@ test("notifications: pagination, unread, mark one / all, preferences, and nobody
 
     const first = all.groups[0]!;
     await maya.mutation(api.inbox.markRead, { ids: first.ids });
-    assert.equal(await maya.query(api.inbox.unreadCount), 14 - first.ids.length);
+    assert.deepEqual(await maya.query(api.inbox.unreadCount), { count: 14 - first.ids.length, complete: true });
     // Another participant cannot mark Maya's notifications.
     await assert.rejects(t.as(member("user0")).mutation(api.inbox.markRead, { ids: [all.groups[1]!.ids[0]!] }));
     assert.equal(await maya.mutation(api.inbox.markAllRead), 14 - first.ids.length);
-    assert.equal(await maya.query(api.inbox.unreadCount), 0);
+    assert.deepEqual(await maya.query(api.inbox.unreadCount), { count: 0, complete: true });
 
     // Muting follows: the next follow sends nothing.
     await maya.mutation(api.inbox.updateSettings, { muted: ["user.followed"] });
@@ -403,7 +403,7 @@ test("external agents: participate over the same capabilities, ask a person to o
 
     // The agent cannot touch Maya's post or delegate, and cannot answer its own sponsorship.
     await assert.rejects(bot.mutation(api.posts.remove, { id: postId }), { code: "FORBIDDEN" });
-    await assert.rejects(bot.mutation(api.tasks.grant, { capability: "concierge.publish" }), { code: "FORBIDDEN" });
+    await assert.rejects(bot.mutation(api.tasks.grant, { capability: "frame.publish" }), { code: "FORBIDDEN" });
     const req = await bot.mutation(api.agents.requestSponsor, { username: "maya" });
     await assert.rejects(bot.mutation(api.agents.respondSponsor, { id: req.id, accept: true }), { code: "FORBIDDEN" });
     await assert.rejects(t.as(member("leo")).mutation(api.agents.respondSponsor, { id: req.id, accept: true }), { code: "FORBIDDEN" });
@@ -451,8 +451,8 @@ test("delegation: Concierge acts for a person only while AuthBoundry allows it; 
     assert.equal((await maya.query(api.posts.feed, {})).posts.length, 0);
 
     // 2. Grant, retry: published as Maya, via Concierge, with AuthBoundry's delegation as evidence.
-    await maya.mutation(api.tasks.grant, { capability: "concierge.publish" });
-    assert.ok((await maya.mutation(api.tasks.delegationStatus)).find((g) => g.capability === "concierge.publish")!.granted);
+    await maya.mutation(api.tasks.grant, { capability: "frame.publish" });
+    assert.ok((await maya.mutation(api.tasks.delegationStatus)).find((g) => g.capability === "frame.publish")!.granted);
     await assert.rejects(leo.mutation(api.tasks.retry, { id: task }), { code: "FORBIDDEN" });
     await maya.mutation(api.tasks.retry, { id: task });
     mine = await settle(() => maya.query(api.tasks.list), (l) => l[0]!.status === "completed");
@@ -471,7 +471,7 @@ test("delegation: Concierge acts for a person only while AuthBoundry allows it; 
     assert.equal(published_.actorType, "agent");
 
     // 3. Standing work: thank commenters, while granted.
-    await maya.mutation(api.tasks.grant, { capability: "concierge.react" });
+    await maya.mutation(api.tasks.grant, { capability: "frame.react" });
     const standing = await maya.mutation(api.tasks.create, { kind: "react" });
     const c1 = await leo.mutation(api.comments.create, { postId: published.id, text: "Nice!" });
     const thread = await settle(() => comments(leo, published.id), (x) => x[0]!.reactions.total === 1);
@@ -484,7 +484,7 @@ test("delegation: Concierge acts for a person only while AuthBoundry allows it; 
     assert.equal(conciergeCard.stats.onBehalf, 2, "the scheduled post and the thank-you reaction");
 
     // 4. Revoke: the very next comment is not reacted to; the task stops and asks.
-    await maya.mutation(api.tasks.revoke, { capability: "concierge.react" });
+    await maya.mutation(api.tasks.revoke, { capability: "frame.react" });
     const c2 = await leo.mutation(api.comments.create, { postId: published.id, text: "Still nice" });
     mine = await settle(() => maya.query(api.tasks.list), (l) => l.find((x) => x.id === standing)!.status === "needs_permission");
     assert.match(mine.find((x) => x.id === standing)!.error!, /revoked/);
@@ -505,12 +505,12 @@ test("delegation: a digest summarises real activity; a task scheduled for later 
     const postId = await post(t, "maya", "x");
     await leo.mutation(api.reactions.set, { postId, kind: "like" });
     await leo.mutation(api.comments.create, { postId, text: "!" });
-    await maya.mutation(api.tasks.grant, { capability: "concierge.digest" });
+    await maya.mutation(api.tasks.grant, { capability: "frame.digest" });
     await maya.mutation(api.tasks.create, { kind: "digest" });
     const l = await settle(() => maya.query(api.tasks.list), (x) => x[0]!.status === "completed");
     assert.match(l[0]!.summary!, /1 reaction and 1 comment from 1 participant/);
 
-    await maya.mutation(api.tasks.grant, { capability: "concierge.publish" });
+    await maya.mutation(api.tasks.grant, { capability: "frame.publish" });
     const later = await maya.mutation(api.tasks.create, { kind: "publish", draft: { text: "later" }, runAt: Date.now() + 3_600_000 });
     await t.runtime.runServices();
     assert.equal((await maya.query(api.tasks.list)).find((x) => x.id === later)!.status, "scheduled");
@@ -627,6 +627,51 @@ test("cancelling a scheduled post releases its images, unless another scheduled 
     await t.runtime.runServices();
     state = await files();
     assert.equal(state[b.fileId], true);
+  }));
+
+// ----------------------------------------------------------------------------- platform capabilities
+
+test("the home feed is one set query per source, served by FeltDB as an index merge over Frame's ordered index", () =>
+  withApp(async (t) => {
+    const { me } = await person(t, "reader");
+    const authors: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      const { me: who, profileId } = await person(t, `author${i}`);
+      authors.push(profileId);
+      if (i < 12) await me.mutation(api.follows.create, { profileId });
+      for (let k = 0; k < 4; k++) await who.mutation(api.posts.create, { text: `${i}/${k}` });
+    }
+    // Frame's own feed, paged to the end: every followed author's post exactly once, newest first.
+    const seen: string[] = [];
+    let cursor: number | undefined;
+    do {
+      const page = await me.query(api.posts.feed, { limit: 7, ...(cursor !== undefined ? { cursor } : {}) });
+      seen.push(...page.posts.map((p) => p.text));
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor !== undefined);
+    assert.equal(seen.length, 48);
+    // The shape the feed sends FeltDB, explained and run: an index merge reading about one page.
+    const followed = authors.slice(0, 12);
+    const db = t.runtime.instance.handle("test") as unknown as { explain(q: unknown): Promise<{ plan: string; index: string }>; query(q: unknown): Promise<{ plan: { accessMethod: string; recordsExamined: number } }> };
+    const shape = { collection: "posts", where: [{ field: "authorId", in: followed }, { field: "createdAt", lt: Date.now() + 1000 }], orderBy: [{ field: "createdAt", direction: "desc" }], limit: 8 };
+    const explained = await db.explain(shape);
+    assert.deepEqual([explained.plan, explained.index], ["index-merge", "posts_authorId_createdAt_ordered"]);
+    const run = await db.query(shape);
+    assert.equal(run.plan.accessMethod, "index_merge");
+    assert.ok(run.plan.recordsExamined <= 9, `read ${run.plan.recordsExamined} of 120 posts for a page of 8`);
+  }));
+
+test("photo links are FeltKit's cacheable kind (stable within their window) and come in derived sizes", () =>
+  withApp(async (t) => {
+    const { me: maya } = await person(t, "maya");
+    const { me: leo } = await person(t, "leo");
+    const postId = await post(t, "maya", "x");
+    const fileId = (await leo.query(api.posts.get, { id: postId }))!.media[0]!.fileId;
+    const a = await leo.query(api.posts.mediaLink, { fileId, variant: "grid" });
+    const b = await leo.query(api.posts.mediaLink, { fileId, variant: "grid" });
+    assert.equal(a.url, b.url, "the same URL again: the browser keeps its copy");
+    assert.notEqual((await maya.query(api.posts.mediaLink, { fileId, variant: "grid" })).url, a.url, "another person gets their own URL");
+    assert.notEqual((await leo.query(api.posts.mediaLink, { fileId, variant: "avatar" })).url, a.url, "another size, another URL");
   }));
 
 // ------------------------------------------------------------------------------------- durability

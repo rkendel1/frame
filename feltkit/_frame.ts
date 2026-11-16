@@ -190,17 +190,18 @@ export function gridItems(db: DatabaseReader, list: PostDoc[]) {
 }
 
 /**
- * One page of visible posts newest-first, `before` a createdAt cursor, from one author or everyone's
- * public posts. Reads past hidden posts (bounded) so a page is not short because of them.
+ * One page of visible posts newest-first, `before` a createdAt cursor: from a set of authors, a set of
+ * communities, or everyone's public posts. A set is one FeltDB query (`in`), which FeltDB serves as a
+ * merge of the ordered (authorId|communityId, createdAt desc) index ranges: a page reads about `limit`
+ * records however many authors there are. Reads past hidden posts (bounded) so a page is not short.
  */
-export async function page(db: DatabaseReader, viewer: ProfileDoc | null, opts: { authorId?: string; communityId?: string; before?: number; limit: number }) {
+export async function page(db: DatabaseReader, viewer: ProfileDoc | null, opts: { authorIds?: string[]; communityIds?: string[]; before?: number; limit: number }) {
   const out: PostDoc[] = [];
   let before = opts.before;
+  const scope = opts.authorIds ? { field: "authorId", in: opts.authorIds } : opts.communityIds ? { field: "communityId", in: opts.communityIds } : { field: "visibility", eq: "public" };
+  if ((opts.authorIds ?? opts.communityIds)?.length === 0) return { items: [], nextCursor: null };
   for (let round = 0; round < 5 && out.length <= opts.limit; round++) {
-    const where = [
-      ...(opts.authorId ? [{ field: "authorId", eq: opts.authorId }] : opts.communityId ? [{ field: "communityId", eq: opts.communityId }] : [{ field: "visibility", eq: "public" }]),
-      ...(before !== undefined ? [{ field: "createdAt", lt: before }] : []),
-    ];
+    const where = [scope, ...(before !== undefined ? [{ field: "createdAt", lt: before }] : [])];
     const { records } = await db.query(posts, { where, orderBy: [{ field: "createdAt", direction: "desc" }], limit: opts.limit + 1 });
     for (const p of records) if (await canSee(db, p, viewer)) out.push(p);
     if (records.length <= opts.limit) break;

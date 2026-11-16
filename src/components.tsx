@@ -510,7 +510,7 @@ export function Grid({ posts }: { posts: GridPost[] }) {
     <div className="grid">
       {posts.map((p) => (
         <Link key={p.id} to={`/p/${p.id}`} className="tile" aria-label={p.text || `Post by ${p.author.username}`}>
-          {p.cover ? <Photo fileId={p.cover.fileId} alt="" /> : <div className="text-tile"><span><RichTextPlain text={p.text} /></span></div>}
+          {p.cover ? <Photo fileId={p.cover.fileId} alt="" size="grid" /> : <div className="text-tile"><span><RichTextPlain text={p.text} /></span></div>}
           {p.mediaCount > 1 && <span className="multi" aria-hidden>▣</span>}
           {p.author.kind === "agent" && <span className="tile-agent" aria-hidden><AgentGlyph size={11} /></span>}
           <span className="tile-stats"><span>♥ {p.reactionCount}</span><span>💬 {p.commentCount}</span></span>

@@ -3,7 +3,7 @@
  * agents, rich text (@mentions, #topics), image preparation, relative times, infinite scroll.
  */
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type AnchorHTMLAttributes, type ReactNode } from "react";
-import { useFeltKit } from "@feltdb/feltkit/react";
+import { useFeltKit, useQuery } from "@feltdb/feltkit/react";
 import { api } from "../feltkit/_generated/api";
 
 // ── Routing: plain history API (the FeltKit server falls back to index.html for app paths). ──
@@ -33,36 +33,18 @@ export function Link({ to, children, ...rest }: { to: string; children: ReactNod
   );
 }
 
-// ── Photos. A file link is issued per request by posts:mediaLink (it checks the caller may see the
-// post the image belongs to), lives an hour, and the server sends it `no-store`. Asking once per photo
-// per page load and reusing the URL keeps a live feed from re-fetching every image when its data
-// changes (docs/GAP-REGISTER.md, FRAME-GAP-01). ──
-const links = new Map<string, Promise<{ url: string; expires: number }>>();
-export function usePhotoUrl(fileId: string | undefined): string | undefined {
+// ── Photos. posts:mediaLink checks the caller may see the post an image belongs to and returns
+// FeltKit's cacheable link: the same URL within its window, cached by the browser. So a live query can
+// simply ask again; nothing is re-downloaded. Sizes: "grid" tiles, "feed" cards, "avatar" faces.
+export type PhotoSize = "grid" | "feed" | "avatar";
+export function usePhotoUrl(fileId: string | undefined, variant?: PhotoSize): string | undefined {
   const client = useFeltKit();
-  const [url, setUrl] = useState<string>();
-  useEffect(() => {
-    if (!fileId) return setUrl(undefined);
-    let live = true;
-    let entry = links.get(fileId);
-    const fresh = (e: { expires: number }) => e.expires - Date.now() > 120_000;
-    const load = () => {
-      const p = client.query(api.posts.mediaLink, { fileId }).then((l) => ({ url: client.fileUrl(l), expires: Date.parse(l.expiresAt) }));
-      links.set(fileId, p);
-      p.catch(() => links.delete(fileId));
-      return p;
-    };
-    if (!entry) entry = load();
-    entry.then((e) => (fresh(e) ? e : load())).then((e) => live && setUrl(e.url), () => undefined);
-    return () => {
-      live = false;
-    };
-  }, [fileId, client]);
-  return url;
+  const link = useQuery(api.posts.mediaLink, fileId ? { fileId, ...(variant ? { variant } : {}) } : "skip");
+  return link ? client.fileUrl(link) : undefined;
 }
 
-export function Photo({ fileId, alt, className, ratio, onDoubleClick }: { fileId: string; alt: string; className?: string; ratio?: number; onDoubleClick?: () => void }) {
-  const url = usePhotoUrl(fileId);
+export function Photo({ fileId, alt, className, ratio, onDoubleClick, size = "feed" }: { fileId: string; alt: string; className?: string; ratio?: number; onDoubleClick?: () => void; size?: PhotoSize }) {
+  const url = usePhotoUrl(fileId, size);
   const [loaded, setLoaded] = useState(false);
   return (
     <div className={`photo ${loaded ? "loaded" : ""} ${className ?? ""}`} style={ratio ? { aspectRatio: String(ratio) } : undefined} onDoubleClick={onDoubleClick}>
@@ -75,7 +57,7 @@ export type Participant = { id?: string; username: string; displayName?: string;
 
 /** People are round; agents are rounded squares with a spark, the same size and weight: different, not lesser. */
 export function Avatar({ user, size = 32 }: { user: Participant; size?: number }) {
-  const url = usePhotoUrl(user.avatarFileId ?? undefined);
+  const url = usePhotoUrl(user.avatarFileId ?? undefined, "avatar");
   const agent = user.kind === "agent";
   const hue = [...user.username].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
   return (

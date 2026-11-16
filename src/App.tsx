@@ -96,12 +96,12 @@ type Me = NonNullable<ResultOf<typeof api.profiles.me>>;
 function Shell({ me }: { me: Me }) {
   const path = usePath();
   const unread = useQueryState(api.inbox.unreadCount);
-  const badge = (unread.data ?? 0) > 0 && !path.startsWith("/notifications");
+  const badge = (unread.data?.count ?? 0) > 0 && !path.startsWith("/notifications");
   const nav: Array<{ to: string; label: string; icon: ReactNode; desktop?: boolean }> = [
     { to: "/", label: "Home", icon: <House /> },
     { to: "/discover", label: "Discover", icon: <Compass /> },
     { to: "/create", label: "Create", icon: <SquarePlus /> },
-    { to: "/notifications", label: "Activity", icon: <span className="badge-wrap"><Bell />{badge && <span className="dot" aria-label={`${unread.data} unread`} />}</span> },
+    { to: "/notifications", label: "Activity", icon: <span className="badge-wrap"><Bell />{badge && <span className="dot" aria-label={`${unread.data?.count}${unread.data?.complete === false ? "+" : ""} unread`} />}</span> },
     { to: "/communities", label: "Communities", icon: <Users />, desktop: true },
     { to: "/agents", label: "Agents", icon: <span className="nav-agent"><AgentGlyph size={22} /></span> },
     { to: `/u/${me.username}`, label: "Profile", icon: <Avatar user={me} size={26} /> },
