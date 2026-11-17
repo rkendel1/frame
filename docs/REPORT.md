@@ -199,11 +199,12 @@ It cannot be merged until the packages are published.
 ## 10. Remaining work, prioritised
 
 1. **Release** `@appport/services`, `@feltdb/core`, `@authboundry/local`, then `@feltdb/feltkit`; merge `platform-next`.
-2. **AuthBoundry security** (found during the work, not fixed): `POST /_authboundry/agents` with an
-   existing id overwrites it as an active agent, which can reactivate a revoked agent or turn a person
-   into one; the local authority re-posts its executor at every start.
-3. **FeltDB ordering bug** (found, not fixed): an `eq` on the leading field of a compound index with no
-   `orderBy` returns index order, not id order, so cursor paging can skip records.
+2. ~~AuthBoundry security~~ **fixed** on authboundry's branch (`cb229b4`): creating an agent never
+   overwrites a principal (no reactivating a revoked agent, no turning a person into one), and the
+   local authority refuses to start with a revoked executor. 5 new Rust tests, 15 / 15 local.
+3. ~~FeltDB ordering bug~~ **fixed** on flow_db's branch (`9e42687`, refined in `e45cc00`): queries with
+   no `orderBy` return record-id order, reading only the matching index group. Frame 20 / 20 and 8 / 8
+   on it.
 4. FeltDB server / managed: `in` is answered correctly but as a scan, not a merge.
 5. FeltKit: an unmerged branch `claude/notifications-pagination` adds `notifications.page()` too; keep
    `f49a40e`'s `page` / `unreadCount` / `markAllRead` and that branch's `list()` when merging.
