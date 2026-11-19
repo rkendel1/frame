@@ -16,7 +16,7 @@
  *   DEMO_SEED=0 npm run start:demo               serve without loading demo data
  */
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -25,6 +25,15 @@ const feltkit = `${root}node_modules/@feltdb/feltkit/bin/feltkit.js`;
 if (process.env.FELTKIT_ENV && process.env.FELTKIT_ENV !== "development") {
   console.error(`[demo] FELTKIT_ENV is "${process.env.FELTKIT_ENV}"; a demo deployment runs the development environment. Unset it.`);
   process.exit(1);
+}
+// The volume outlives the container: a runtime.json left by the previous run names a pid that means nothing now
+// (and may even match a live process), which makes `feltkit start` refuse with "already running" and crash-loop.
+if (process.env.FLY_APP_NAME) {
+  rmSync(`${root}.feltkit/development/runtime.json`, { force: true });
+  // Same for the state directory's locks, left behind when the previous container was stopped mid-write.
+  // This container runs exactly one server on the volume, so none of them can be live.
+  const state = process.env.FELTKIT_STATE_DIR;
+  if (state) for (const lock of ["state.lock", "owner.lock"]) rmSync(`${state}/${lock}`, { force: true });
 }
 const args = [feltkit, "start", "--env", "development", "--host", process.env.HOST ?? "0.0.0.0", ...process.argv.slice(2)];
 const server = spawn(process.execPath, args, { cwd: root, stdio: ["inherit", "pipe", "inherit"] });
