@@ -116,3 +116,31 @@ The data model, attribution rules and authorization boundaries are in
 [docs/REPORT.md](docs/REPORT.md) §5 and §7.
 
 Photos in the demo: Unsplash License; sources in [docs/SEED-PHOTOS.md](docs/SEED-PHOTOS.md).
+
+## Public demo deployment
+
+Every FeltKit starter deploys as a public demo the same way:
+
+```bash
+npm ci
+npm run build
+npm run start:demo
+```
+
+`start:demo` (`scripts/demo-server.mjs`) runs the built app in FeltKit's **development** environment, so the
+app's declared dev users are on offer and a visitor is signed in as one automatically: no login page, straight to
+the app. Once the server is up it loads the demo data through the app's own functions (`scripts/demo-seed.ts`: `npm run seed`, then Ada gets a profile and follows everyone). Re-running is a no-op.
+
+| Variable | Effect |
+|---|---|
+| `PORT` / `HOST` | where it listens (default: FeltKit's port from 3000, `0.0.0.0`) |
+| `FELTKIT_STATE_DIR` | where the demo data lives; point it at a volume to keep it across restarts |
+| `DEMO_SEED=0` | serve without loading demo data |
+| `DEMO_GENERATED_IMAGES=1` | generated images instead of downloading the demo photos from Unsplash |
+
+**Demo only.** Every visitor acts as a dev user, with that user's roles (including admin and operator roles), on
+one shared copy of the data, and development mode relaxes production safeguards. Never give a demo deployment real
+provider keys, credentials or customer data, and use `npm start` (production) for anything real.
+
+The demo people's accounts use the development password in `scripts/seed.ts`; on a public demo anyone can sign in as them.
+

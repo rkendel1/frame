@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { SignIn, useMutation, useQueryState, useSession } from "@feltdb/feltkit/react";
 import { Bell, Compass, House, SquarePlus, Users } from "lucide-react";
 import type { ResultOf } from "@feltdb/feltkit/client";
@@ -7,7 +7,15 @@ import { AgentGlyph, Avatar, Link, usePath } from "./lib";
 import { Agents, Communities, CommunityPage, Create, Discover, Home, Notifications, PostView, Profile, Settings, TopicPage } from "./pages";
 
 export function App() {
-  const { session } = useSession();
+  const { session, signInAsDevUser } = useSession();
+  // Development (or a demo deployment): sign in as the first dev user so the app opens ready to use.
+  const tried = useRef(false);
+  useEffect(() => {
+    if (session && !session.principal && session.devUsers.length && !tried.current) {
+      tried.current = true;
+      void signInAsDevUser(session.devUsers[0]!.id);
+    }
+  }, [session, signInAsDevUser]);
   if (!session) return <Splash />;
   if (!session.principal) return <Welcome />;
   return <Signed key={session.principal.id} name={session.principal.displayName} />;
