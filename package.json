@@ -8,6 +8,7 @@
     "build": "feltkit build",
     "start": "feltkit start",
     "start:demo": "node scripts/demo-server.mjs",
+    "deploy:demo": "feltkit deploy --target fly && node scripts/demo-artifact.mjs",
     "test": "feltkit test",
     "inspect": "feltkit inspect",
     "deploy": "feltkit deploy",
@@ -29,5 +30,10 @@
     "@vitejs/plugin-react": "5.1.0",
     "typescript": "5.9.3",
     "vite": "7.3.7"
+  },
+  "feltkitDemo": {
+    "include": [
+      "scripts/seed.ts"
+    ]
   }
 }
